@@ -1,0 +1,322 @@
+pack: graft
+title: Request desk
+about: How a request desk's lanes, runners, and program file are set
+version: 1.0.0
+family: security
+# A request desk takes a person's report and lets agents plan, build, and
+# land the change. Its safety is configuration in three places: the
+# program file, the hub action each lane is, and the serves rule of each
+# runner that holds a key. The graft source reads all three. The
+# declared tier judges what the program file says alone; the granted tier
+# judges what the hub grants the lanes and runners the file names.
+tiers: [declared, granted]
+
+params:
+  # The most lines a small fix may change and still ship with no plan approval.
+  max_small_fix_lines: 400
+  # The most one request may spend, in US dollars.
+  max_spend_usd: 25
+  # Whether a runner may serve the data tier, which reads real rows. Off
+  # unless the estate turns it on.
+  data_runners: false
+  # The hub sources that may put a tool on a runner: the desk's own. Empty,
+  # any named source passes.
+  desk_sources: []
+
+scopes:
+  # A lane whose hub action exists.
+  held_lane: lane_action.exists
+  # The lowest lane and every lane for reporters outside the program,
+  # where its hub action exists.
+  tierless_lane: (graft_lane.lowest || graft_lane.outside) && lane_action.exists
+  # A lane that may change a protected path, where its hub action exists.
+  protected_lane: graft_lane.protected && lane_action.exists
+  # A lane for reporters outside the program.
+  outside_lane: graft_lane.outside
+  # A runner the hub has, with a serves rule.
+  serving_runner: runner_source.exists && runner_source.serves
+  # The production runner of a name that also names one for nonproduction.
+  paired_runner: graft_runner.tier == "production" && graft_runner.twin != ""
+
+rules:
+  - id: graft.lane-action-missing
+    title: A lane has no hub action
+    aim: Every lane has a hub action
+    kind: graft_lane
+    severity: medium
+    tier: granted
+    standard: extend-the-existing-actions-engine-every-run-goes-to-the-led
+    pillar: platform/security
+    needs: { lane_action.exists: the hub was not asked for the lane's action }
+    check: lane_action.exists
+    detail: '"the hub %s has no action %s, so nobody can hold the lane".format([lane_action.hub, lane_action.id])'
+    fix: Start the request desk so it declares the lane's action, then give the action its access rules in the hub.
+
+  - id: graft.lane-open
+    title: A lane is open to everyone
+    aim: No lane is open to everyone
+    kind: graft_lane
+    severity: high
+    tier: granted
+    standard: extend-the-existing-actions-engine-every-run-goes-to-the-led
+    pillar: platform/security
+    scope: held_lane
+    needs:
+      lane_action.everyone: the lane action's access was not read
+      lane_action.rules: the lane action's access rules were not read
+    check: '!lane_action.everyone && lane_action.rules.all(r, r.who || r.owns)'
+    detail: >-
+      lane_action.everyone
+        ? "the action %s is open to everyone signed in, so everyone holds the lane on every repository".format([lane_action.id])
+        : "a rule of the action %s names no people and no ownership, so anyone signed in holds the lane wherever the rule takes".format([lane_action.id])
+    fix: Take everyone off the lane's action in the hub, and give each rule an audience, a grant, or an ownership role.
+
+  - id: graft.lane-unheld
+    title: No access rule opens a lane
+    aim: An access rule opens every lane
+    kind: graft_lane
+    severity: medium
+    tier: granted
+    standard: extend-the-existing-actions-engine-every-run-goes-to-the-led
+    pillar: platform/security
+    scope: held_lane
+    skip: [{ if: lane_action.everyone, because: the action is open to everyone; the open lane rule covers it }]
+    needs:
+      lane_action.rules: the lane action's access rules were not read
+      lane_action.grants: the lane action's grants were not read
+    check: size(lane_action.rules) > 0 || lane_action.grants > 0 || lane_action.audiences > 0 || lane_action.home
+    detail: '"the action %s has no access rule, so only an admin holds the lane, and an admin does not count when the desk asks for a person".format([lane_action.id])'
+    fix: Add a rule to the lane's action in the hub that says who holds the lane and on which repositories.
+
+  - id: graft.lane-data-tier
+    title: A lane carries the data tier
+    aim: No lane carries the data tier
+    kind: graft_lane
+    severity: high
+    tier: granted
+    standard: production-data-never-reaches-a-lower-environment-unmasked
+    pillar: platform/security
+    scope: held_lane
+    needs: { lane_action.tiers: the lane action's tiers were not read }
+    check: '!("data" in lane_action.tiers)'
+    detail: '"the action %s carries the data tier, so everyone who holds the lane reads real rows with no approval".format([lane_action.id])'
+    fix: Take data out of the lane action's access.tiers in the hub. A run that needs real rows asks for the tier and waits for a person who holds it.
+
+  - id: graft.lane-outside-tier
+    title: The lowest or an outside lane carries a tool tier
+    aim: The lowest and outside lanes carry no tool tier
+    kind: graft_lane
+    severity: high
+    tier: granted
+    standard: set-rigor-by-what-a-failure-costs-in-a-few-named-classes
+    pillar: platform/security
+    scope: tierless_lane
+    needs:
+      graft_lane.outside: the program file was not read
+      lane_action.tiers: the lane action's tiers were not read
+    check: size(lane_action.tiers) == 0
+    detail: '"%s carries %s, so its reporters reach live systems".format([graft_lane.outside ? "a lane for reporters outside the program" : "the lowest lane", lane_action.tiers.join(", ")])'
+    fix: Empty the lane action's access.tiers in the hub. A request in this lane that needs a tool asks for the tier and waits.
+
+  - id: graft.lane-protected-unapproved
+    title: A protected lane ships without a person's approval
+    aim: A protected lane ships only with a person's approval
+    kind: graft_lane
+    severity: high
+    tier: granted
+    standard: agents-deliver-their-own-verified-work-except-infrastructure
+    pillar: platform/security
+    scope: protected_lane
+    needs:
+      graft_lane.protected: the program file was not read
+      lane_action.rules: the lane action's access rules were not read
+      lane_action.approval: the lane action's approval was not read
+    check: >-
+      lane_action.approval != "none"
+        || (lane_action.rules.all(r, r.approval != "none")
+            && !lane_action.everyone && lane_action.grants == 0 && lane_action.audiences == 0 && !lane_action.home)
+    detail: >-
+      lane_action.rules.exists(r, r.approval == "none")
+        ? "%s of the action %s lets a plan through with approval: false, and this lane may change protected paths".format([plural(size(lane_action.rules.filter(r, r.approval == "none")), "rule", "rules"), lane_action.id])
+        : "the action %s lets people in outside its rules and holds no run for approval, and this lane may change protected paths".format([lane_action.id])
+    fix: Set approval to true or self on every rule of the lane's action in the hub, so a change to a protected path always waits for a person.
+
+  - id: graft.lane-outside-flags
+    title: An outside lane ships a small fix or passes a protected path
+    aim: No outside lane ships a small fix or passes a protected path
+    kind: graft_lane
+    severity: high
+    tier: declared
+    standard: set-rigor-by-what-a-failure-costs-in-a-few-named-classes
+    pillar: platform/security
+    scope: outside_lane
+    needs: { graft_lane.outside: the program file was not read }
+    check: '!graft_lane.small_fix && !graft_lane.protected'
+    detail: >-
+      "the lane %s is for reporters outside the program and is also marked %s".format([graft_lane.id,
+        graft_lane.small_fix && graft_lane.protected ? "small_fix and protected" : (graft_lane.small_fix ? "small_fix" : "protected")])
+    fix: Take small_fix and protected off the lane in the program file, or take outside off it if its reporters belong to the program.
+
+  - id: graft.runner-missing
+    title: A runner the program names is not set up in the hub
+    aim: Every runner the program names is set up in the hub
+    kind: graft_runner
+    severity: medium
+    tier: granted
+    standard: self-service-cloud-operations-run-as-a-narrow-machine-identi
+    pillar: platform/security
+    needs: { runner_source.exists: the hub's sources were not read }
+    check: runner_source.exists && runner_source.serves
+    detail: >-
+      runner_source.exists
+        ? "the hub source %s has no serves rule, so it runs no tool".format([runner_source.id])
+        : "the hub %s has no source %s".format([runner_source.hub, runner_source.id])
+    fix: Register the runner as a source of class runner in the hub and give it a serves rule, or correct its name in the program file.
+
+  - id: graft.runner-serves-anywhere
+    title: A runner serves tools declared from anywhere
+    aim: A runner serves only tools declared where its serves rule says
+    kind: graft_runner
+    severity: high
+    tier: granted
+    standard: self-service-cloud-operations-run-as-a-narrow-machine-identi
+    pillar: platform/security
+    scope: serving_runner
+    needs: { runner_source.on: the runner's serves rule was not read }
+    check: runner_source.on
+    detail: '"the serves rule of %s has no on, so nothing says which repositories may put a command on its key".format([runner_source.id])'
+    fix: Set serves.on on the runner's source in the hub to the blueprint and filter of the repositories that may use its key.
+
+  - id: graft.runner-serves-source
+    title: A runner's serves rule names no source or no tier
+    aim: A runner's serves rule names a source and a tier
+    kind: graft_runner
+    severity: medium
+    tier: granted
+    standard: self-service-cloud-operations-run-as-a-narrow-machine-identi
+    pillar: platform/security
+    scope: serving_runner
+    needs:
+      runner_source.sources: the runner's serves rule was not read
+      runner_source.tiers: the runner's serves rule was not read
+    check: >-
+      size(runner_source.tiers) > 0 && size(runner_source.sources) > 0
+        && (size(params.desk_sources) == 0 || runner_source.sources.exists(s, s in params.desk_sources))
+    detail: >-
+      size(runner_source.tiers) == 0
+        ? "the serves rule of %s names no tier".format([runner_source.id])
+        : (size(runner_source.sources) == 0
+            ? "the serves rule of %s names no source, so the desk cannot declare a tool on it".format([runner_source.id])
+            : "the serves rule of %s names %s, none of them the desk's source".format([runner_source.id, runner_source.sources.join(", ")]))
+    fix: Name the request desk's source under serves.sources on the runner's source in the hub, and the tiers its key is for under serves.tiers.
+
+  - id: graft.runner-shared
+    title: One runner serves production and nonproduction
+    aim: Production and nonproduction have separate runners
+    kind: graft_runner
+    severity: high
+    tier: declared
+    standard: self-service-cloud-operations-run-as-a-narrow-machine-identi
+    pillar: platform/security
+    scope: paired_runner
+    needs: { graft_runner.id: the program file was not read }
+    check: graft_runner.id != graft_runner.twin
+    detail: '"the runner name %s gives %s for production and for nonproduction, so one key reaches both".format([graft_runner.name, graft_runner.id])'
+    fix: Name a different runner for each environment tier in the program file, each holding a key that reaches only its own tier.
+
+  - id: graft.runner-reader-acts
+    title: A reading runner also serves the act tier
+    aim: A reading runner does not serve the act tier
+    kind: graft_runner
+    severity: high
+    tier: granted
+    standard: self-service-cloud-operations-run-as-a-narrow-machine-identi
+    pillar: platform/security
+    scope: serving_runner
+    skip: [{ if: '!("read" in runner_source.tiers)', because: the runner does not serve the read tier }]
+    needs: { runner_source.tiers: the runner's serves rule was not read }
+    check: '!("act" in runner_source.tiers)'
+    detail: '"%s serves read and act, so the key that only looks can also change a live system".format([runner_source.id])'
+    fix: Take act out of the runner's serves.tiers in the hub, and serve it from a runner of its own with its own key.
+
+  - id: graft.runner-data
+    title: A runner serves the data tier
+    aim: No runner serves the data tier
+    kind: graft_runner
+    severity: high
+    tier: granted
+    standard: production-data-never-reaches-a-lower-environment-unmasked
+    pillar: platform/security
+    scope: serving_runner
+    needs: { runner_source.tiers: the runner's serves rule was not read }
+    check: 'params.data_runners || !("data" in runner_source.tiers)'
+    detail: '"%s serves the data tier, so a tool on its key may read real rows".format([runner_source.id])'
+    fix: Take data out of the runner's serves.tiers in the hub, or set data_runners in the pack's tuning if the estate means its tools to read real rows.
+
+  - id: graft.repository-unprotected
+    title: A repository protects no path
+    aim: Every repository protects a path
+    kind: graft_repository
+    severity: low
+    tier: declared
+    standard: agents-deliver-their-own-verified-work-except-infrastructure
+    pillar: platform/security
+    needs: { graft_repository.protected: the program file was not read }
+    check: size(graft_repository.protected) > 0
+    detail: '"%s lists no protected path beyond graft.yaml, so every lane may change its pipeline, its infrastructure, and its deployment".format([graft_repository.path])'
+    fix: List the repository's pipeline, infrastructure, and deployment paths under protected in the program file.
+
+  - id: graft.small-fix-lines
+    title: A small fix may be large
+    aim: A small fix stays within the line limit
+    kind: graft_program
+    severity: medium
+    tier: declared
+    standard: set-rigor-by-what-a-failure-costs-in-a-few-named-classes
+    pillar: platform/agents
+    needs: { graft_program.small_fix_lines: the program file was not read }
+    check: graft_program.small_fix_lines <= params.max_small_fix_lines
+    detail: '"limits.small_fix_lines is %d; over %d lines a change is no small fix and should wait for its plan".format([int(graft_program.small_fix_lines), int(params.max_small_fix_lines)])'
+    fix: Lower limits.small_fix_lines in the program file.
+
+  - id: graft.spend-cap
+    title: A request may spend too much
+    aim: A request's spend stays within the cap
+    kind: graft_program
+    severity: medium
+    tier: declared
+    standard: set-rigor-by-what-a-failure-costs-in-a-few-named-classes
+    pillar: platform/agents
+    needs: { graft_program.spend_usd: the program file was not read }
+    check: graft_program.spend_usd <= params.max_spend_usd
+    detail: '"limits.spend_usd is %s a request; the estate allows %s".format([string(graft_program.spend_usd), string(params.max_spend_usd)])'
+    fix: Lower limits.spend_usd in the program file, or raise max_spend_usd in the pack's tuning if the estate means to allow it.
+
+  - id: graft.trusted
+    title: The program is trusted
+    aim: The program is not trusted
+    kind: graft_program
+    severity: low
+    tier: declared
+    standard: self-service-cloud-operations-run-as-a-narrow-machine-identi
+    pillar: platform/security
+    needs: { graft_program.trusted: the program file was not read }
+    check: '!graft_program.trusted'
+    detail: '"trusted is true: the sandbox holds a read-only cloud key that reads both environment tiers, so every run counts as having read production"'
+    fix: Set trusted to false in the program file, or waive this finding with an owner and an end so the choice is on record.
+
+  - id: graft.hours-unset
+    title: Changes land unreviewed at any hour
+    aim: Changes that land unreviewed keep to set hours
+    kind: graft_program
+    severity: medium
+    tier: declared
+    standard: agents-deliver-their-own-verified-work-except-infrastructure
+    pillar: platform/agents
+    skip: [{ if: size(graft_program.unreviewed_lanes) == 0, because: every lane lands through a pull request }]
+    needs:
+      graft_program.unreviewed_lanes: the program file was not read
+      graft_program.hours_schedule: the program file was not read
+    check: graft_program.hours_schedule != ""
+    detail: '"%s without review and hours.schedule is not set, so a change ships when nobody is on call".format([plural(size(graft_program.unreviewed_lanes), "lane lands", "lanes land")])'
+    fix: Set hours.schedule in the program file to the on-call schedule the desk ships under.

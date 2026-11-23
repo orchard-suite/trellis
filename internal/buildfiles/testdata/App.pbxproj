@@ -1,0 +1,7 @@
+		buildSettings = {
+			SDKROOT = iphoneos;
+			TARGETED_DEVICE_FAMILY = "1,2";
+		};
+		buildSettings = {
+			SDKROOT = macosx;
+		};

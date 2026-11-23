@@ -1,0 +1,17 @@
+# The alerts pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. trellis_test.go
+# holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+rules:
+  alerts.selector-empty:
+    fail: { alert: { name: RunnersSilent, for_seconds: 900, labels: { severity: critical }, selectors: [{ selector: 'gha_max_runners{namespace="arc-runners"}', series: 0, optional: false, metric_series: 12, matchers: [{ label: namespace, series: 0 }] }], keeps: [namespace], may_keep: [namespace] } }
+    pass: { alert: { name: AppErrors, for_seconds: 600, labels: { severity: warning }, selectors: [{ selector: 'requests_total{job="app"}', series: 4, optional: false }, { selector: 'claims{excluded="true"}', series: 0, optional: true, metric_series: 0, matchers: [{ label: excluded, series: 0 }] }, { selector: 'requests_total{code=~"5..",job="app"}', series: 0, optional: false, metric_series: 4, matchers: [{ label: code, series: 0 }, { label: job, series: 4 }] }], keeps: [job], may_keep: [job] } }
+    nodata: { alert: { name: Broken, for_seconds: 0, labels: {}, parse_error: 'unexpected end of input' } }
+  alerts.no-workload:
+    fail: { alert: { name: StoreDown, for_seconds: 600, labels: { severity: critical }, selectors: [{ selector: 'replicas_ready{statefulset="clickhouse"}', series: 1, optional: false }], keeps: [], may_keep: [] } }
+    pass: { alert: { name: StoreDown, for_seconds: 600, labels: { severity: critical, namespace: ledger }, selectors: [{ selector: 'replicas_ready{statefulset="clickhouse"}', series: 1, optional: false }], keeps: [], may_keep: [] } }
+    nodata: { alert: { name: Broken, for_seconds: 0, labels: {}, parse_error: 'unexpected end of input' } }
+  alerts.moving-wait:
+    fail: { alert: { name: NeverBackedUp, for_seconds: 93600, labels: { severity: critical }, selectors: [{ selector: last_backup_at, series: 20, optional: false }], keeps: [node, pvc, service], may_keep: [node, pvc, service] } }
+    pass: { alert: { name: NeverBackedUp, for_seconds: 93600, labels: { severity: critical }, selectors: [{ selector: last_backup_at, series: 20, optional: false }], keeps: [pvc, service], may_keep: [pvc, service] } }
+    nodata: { alert: { name: Broken, for_seconds: 0, labels: {}, parse_error: 'unexpected end of input' } }

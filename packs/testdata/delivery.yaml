@@ -1,0 +1,57 @@
+# The delivery pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+repo: &repo { archived: false, fork: false }
+private: &private { empty: false, private: true, files: [Makefile, .github/workflows/ci.yml] }
+none: &none { present: false, default: "", targets: [], deps: {} }
+rules:
+  delivery.private-app-build:
+    fail:
+      repo: *repo
+      forge: *private
+      build: { make: *none, apps: [], workflows: [{ path: .github/workflows/ci.yml, runs_on: ["${{ matrix.os }}", macos-15], runs: [], uses: [] }] }
+    pass:
+      repo: *repo
+      forge: *private
+      build: { make: *none, apps: [], workflows: [{ path: .github/workflows/ci.yml, runs_on: [house], runs: [make check], uses: [actions/checkout@v4] }] }
+    nodata: { repo: *repo, forge: *private }
+  delivery.private-ci-unconsumed:
+    fail:
+      repo: *repo
+      forge: *private
+      runs: { folders: [] }
+      build: { make: *none, apps: [], workflows: [{ path: .github/workflows/ci.yml, runs_on: [house], runs: [make check], uses: [] }] }
+    pass:
+      repo: *repo
+      forge: *private
+      runs: { folders: [""] }
+      build: { make: *none, apps: [], workflows: [{ path: .github/workflows/ci.yml, runs_on: [house], runs: [make check], uses: [] }] }
+    nodata:
+      repo: *repo
+      forge: *private
+      build: { make: *none, apps: [], workflows: [{ path: .github/workflows/ci.yml, runs_on: [house], runs: [], uses: [] }] }
+  delivery.makefile:
+    fail: { repo: *repo, forge: { empty: false, files: [go.mod, main.go] }, build: { make: *none, apps: [], workflows: [] } }
+    pass: { repo: *repo, forge: { empty: false, files: [go.mod, Makefile] }, build: { make: { present: true, default: image, targets: [image], deps: { image: [] } }, apps: [], workflows: [] } }
+    nodata: { repo: *repo, forge: { empty: false, files: [go.mod] } }
+  delivery.app-targets:
+    fail:
+      repo: *repo
+      forge: { empty: false, files: [Makefile] }
+      build: { make: { present: true, default: mac, targets: [mac], deps: { mac: [] } }, apps: [{ platform: mac, path: desktop/package.json }, { platform: ios, path: ios/App.xcodeproj/project.pbxproj }], workflows: [] }
+    pass:
+      repo: *repo
+      forge: { empty: false, files: [Makefile] }
+      build: { make: { present: true, default: mac, targets: [mac, ios], deps: { mac: [], ios: [] } }, apps: [{ platform: mac, path: desktop/package.json }, { platform: ios, path: ios/App.xcodeproj/project.pbxproj }], workflows: [] }
+    nodata: { repo: *repo, forge: { empty: false, files: [Makefile] } }
+  delivery.default-target:
+    fail:
+      repo: *repo
+      forge: { empty: false, files: [Makefile] }
+      build: { make: { present: true, default: test, targets: [test, ios, desktop], deps: { test: [], ios: [], desktop: [] } }, apps: [{ platform: ios, path: ios/App.xcodeproj/project.pbxproj }], workflows: [] }
+    pass:
+      repo: *repo
+      forge: { empty: false, files: [Makefile] }
+      build: { make: { present: true, default: default, targets: [default, ios], deps: { default: [ios], ios: [] } }, apps: [{ platform: ios, path: ios/App.xcodeproj/project.pbxproj }], workflows: [] }
+    nodata: { repo: *repo, forge: { empty: false, files: [Makefile] } }

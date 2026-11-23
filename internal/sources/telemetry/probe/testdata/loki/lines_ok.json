@@ -1,0 +1,7 @@
+{"status":"success","data":{"resultType":"streams","result":[{"stream":{"app":"myapp","namespace":"myapps","container":"myapp"},"values":[
+ ["1793486527000000000","{\"timestamp\":\"2026-10-31T19:06:29.280Z\",\"level\":\"info\",\"msg\":\"request\",\"http_route\":\"/healthz\",\"trace_id\":\"98fa0dc05dda5ab0e962add11a222665\"}"],
+ ["1793486526000000000","{\"timestamp\":\"2026-10-31T19:06:28.280Z\",\"level\":\"info\",\"message\":\"feed refreshed\",\"feed\":\"hazards\",\"trace_id\":\"1afa0dc05dda5ab0e962add11a222665\"}"],
+ ["1793486525600000000","failed to try resolving symlinks in path \"/var/log/pods/myapps_myapp-0_0000/myapp/0.log\": lstat /var/log/pods/myapps_myapp-0_0000/myapp/0.log: no such file or directory"],
+ ["1793486525500000000","unable to retrieve container logs for containerd://0123456789abcdef"],
+ ["1793486525000000000","{\"timestamp\":\"2026-10-31T19:06:27.280Z\",\"level\":\"warn\",\"msg\":\"slow upstream\",\"ms\":2200}"]
+]}]}}

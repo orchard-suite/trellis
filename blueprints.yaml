@@ -1,0 +1,177 @@
+# The blueprints trellis writes, offered to the hub before the first push.
+# The hub creates the ones it lacks and adds only what is missing to the
+# rest, so an estate's own edits stay. The ids here are roles, not names:
+# trellis writes each into the blueprint the sink's `write` settings name
+# (finding_security, finding_platform, verdict, pack, pillar, rule,
+# waiver), so an estate keeps its own words. The rule and waiver lists are
+# written, and offered, only when the estate names their blueprints. A
+# relation whose target is a role targets the blueprint that role is
+# written into. Each finding, verdict, and weighed waiver also links to the
+# entity it is about, through a relation trellis adds for every blueprint a
+# mapping reads; nothing here names one. The waivers people grant are the
+# estate's own list, read through a mapping; the waiver role is trellis's
+# account of every waiver it weighed, from every store.
+blueprints:
+  - id: finding_security
+    title: Security finding
+    group: Operations
+    icon: shield
+    description: >
+      One security rule one thing breaks, with how to fix it, who owns it, and when it is due.
+      Keyed by rule/subject. Written by trellis every refresh; a finding that clears, or that a
+      waiver covers, is removed; one whose facts could not be read stays, marked carried. A record
+      until fixed.
+    canvas: { default: hidden }
+    lifecycle: { grace: { runs: 2, duration: 1h } }
+    fields: &finding
+      rule: { type: string, chip: true, description: The rule id, such as image.cve-kev., overridable: false }
+      pack: { type: string, chip: true, description: The rulebook the rule is in., overridable: false }
+      standard: { type: string, title: Standard rule, description: The rule of the platform standard this one enforces., overridable: false }
+      controls: { type: array, title: Controls, description: "The outside frameworks' controls the rule covers, as framework:control.", overridable: false }
+      tier: { type: string, chip: true, description: The pack tier the rule belongs to., overridable: false }
+      severity: { type: enum, values: [critical, high, medium, low], chip: true, overridable: false }
+      kind: { type: string, chip: true, title: Subject kind, overridable: false }
+      subject: { type: string, description: The subject's key on the board., overridable: false }
+      detail: { type: string, description: What was found, in one line., overridable: false }
+      fix: { type: string, description: The one-line fix., overridable: false }
+      evidence: { type: markdown, description: The queries behind the finding and what came back., overridable: false }
+      owner: { type: string, chip: true, description: Who answers for the thing it is about, from the estate's owner settings., overridable: false }
+      first_seen: { type: datetime, title: First seen, description: When it first opened, from trellis's history when it keeps one., overridable: false }
+      days_open: { type: number, title: Days open, description: Days since it first opened., overridable: false }
+      due: { type: datetime, description: When it must be fixed by, from the estate's deadline for its severity., overridable: false }
+      overdue: { type: boolean, chip: true, description: Its deadline has passed., overridable: false }
+      carried: { type: boolean, description: "Judged on a fact kept from an earlier pass, because its source could not read it this time.", overridable: false }
+      as_of: { type: datetime, title: As of, description: The day the verdict was judged, from the oldest fact behind it., overridable: false }
+      cause: { type: enum, values: [subject, rule], chip: true, description: "Why it opened: the thing changed, or the pack's rule did. Written when trellis keeps history.", overridable: false }
+      reopened: { type: number, title: Reopened, description: Times it closed and opened again. Written when trellis keeps history., overridable: false }
+      board: { type: url, title: On the board, overridable: false }
+      notes: { type: markdown }
+    relations:
+      pillar: { target: pillar, many: false, title: Pillar, inverseTitle: Security findings }
+
+  - id: finding_platform
+    title: Platform finding
+    group: Operations
+    icon: checklist
+    description: >
+      One rule of the platform's standard (telemetry, how a repository is built, the shape of an
+      interface) that one thing breaks, with how to fix it. Keyed by rule/subject. Written by
+      trellis every refresh; a finding that clears, or that a waiver covers, is removed. A record
+      until fixed.
+    canvas: { default: hidden }
+    lifecycle: { grace: { runs: 2, duration: 1h } }
+    fields: *finding
+    relations:
+      pillar: { target: pillar, many: false, title: Pillar, inverseTitle: Platform findings }
+
+  - id: verdict
+    title: Verdict
+    group: Operations
+    icon: checklist
+    description: >
+      One subject judged by one tiered pack: the highest tier it reached, and how many of the
+      pack's rules failed or had no data on it. Keyed by pack/kind/subject. Written by trellis
+      every refresh, so a scorecard levels by the tier trellis gave and never judges again. A
+      subject a rule had no data for stops below that rule's tier: no data never counts as a pass.
+    canvas: { default: hidden }
+    lifecycle: { grace: { runs: 2, duration: 1h } }
+    fields:
+      pack: { type: string, chip: true, overridable: false }
+      kind: { type: string, chip: true, title: Subject kind, overridable: false }
+      subject: { type: string, description: The subject's key on the board., overridable: false }
+      tier: { type: string, chip: true, description: The highest tier reached; empty when not even the lowest., overridable: false }
+      tier_rank: { type: number, title: Tier rank, description: "The tier's place, counting from 1 for the lowest; 0 for none.", overridable: false }
+      findings: { type: number, description: Open findings of the pack on the subject., overridable: false }
+      unchecked: { type: number, description: Rules of the pack that had no data on the subject., overridable: false }
+      checks: { type: object, title: Checks, description: "Every counted rule of the pack that has a tier and applies to the subject, by trellis's rule id, each pass (passed, or failed under a valid waiver), fail (an open finding), or unknown (no data). The subject reaches a tier exactly when every rule here of that tier or a lower one is pass. An aggregation with fn checks rolls it onto the subject, where a scorecard rule judged by it reads one entry.", overridable: false }
+      trend: { type: trend, title: Tier trend, description: "The tier over trellis's trend window, as steps. Written when trellis keeps history.", overridable: false }
+      tier_since: { type: datetime, title: Tier since, description: When the tier it holds now began. Written when trellis keeps history., overridable: false }
+      tier_best: { type: number, title: Best tier rank, description: The highest tier rank held in the window. Written when trellis keeps history., overridable: false }
+      tier_direction: { type: enum, values: [better, steady, worse], chip: true, title: Direction, colors: { better: green, steady: grey, worse: red }, description: The tier over the window. Written when trellis keeps history., overridable: false }
+      board: { type: url, title: On the board, overridable: false }
+
+  - id: pack
+    title: Standard pack
+    group: Operations
+    icon: checklist
+    description: >
+      One pack of rules the estate's conformance board judges with: its version, its family,
+      whether it counts or is a draft, and how many rules it holds. Written by trellis every
+      refresh, so the catalog records which version of each standard the estate adopted.
+    lifecycle: { grace: { runs: 2, duration: 1h } }
+    fields:
+      version: { type: string, chip: true, overridable: false }
+      family: { type: string, chip: true, overridable: false }
+      status: { type: string, chip: true, description: active, or draft (judged, never counted)., overridable: false }
+      rules: { type: number, overridable: false }
+      tiers: { type: array, description: The pack's tiers, lowest first., overridable: false }
+      source: { type: string, description: Built into trellis, or the estate's own file., overridable: false }
+      level: { type: enum, values: [red, amber, green, grey], chip: true, colors: { red: red, amber: orange, green: green, grey: grey }, description: The pack's level by the estate's rollup., overridable: false }
+      overdue: { type: number, description: The pack's open findings past their deadline., overridable: false }
+      conformant: { type: number, title: Conformant %, description: The share of judged subjects that are green, now., overridable: false }
+      trend: { type: trend, title: Conformant trend, description: The share conformant each day. Written when trellis keeps history., overridable: false }
+      change_7d: { type: number, title: 7-day change, description: The change in share over 7 days, in points., overridable: false }
+      change_30d: { type: number, title: 30-day change, description: The change in share over 30 days, in points., overridable: false }
+      board: { type: url, title: On the board, overridable: false }
+
+  - id: rule
+    title: Conformance rule
+    group: Operations
+    icon: checklist
+    description: >
+      One rule the estate's conformance board judges with, whether a pack file holds it or a source
+      brought it from another policy engine, such as Azure Policy, whose verdict trellis passes
+      through. Keyed by rule id. Written by trellis every refresh, with how the rule answered across
+      the estate, so every rule an estate holds is in one list.
+    lifecycle: { grace: { runs: 2, duration: 1h } }
+    fields:
+      rule: { type: string, description: "The rule id, such as image.cve-kev, or azure.<definition name> for a rule Azure Policy holds.", overridable: false }
+      pack: { type: string, chip: true, description: The pack the rule is in., overridable: false }
+      kind: { type: string, chip: true, title: Subject kind, overridable: false }
+      severity: { type: enum, values: [critical, high, medium, low], chip: true, overridable: false }
+      standard: { type: string, title: Standard rule, description: The rule of the platform standard this one enforces., overridable: false }
+      controls: { type: array, title: Controls, description: "The outside frameworks' controls the rule covers, as framework:control.", overridable: false }
+      tier: { type: string, chip: true, description: The pack tier the rule belongs to., overridable: false }
+      status: { type: enum, values: [counted, announced, draft], chip: true, colors: { counted: green, announced: yellow, draft: grey }, description: "counted, announced (counts from a later day), or draft (judged, never counted).", overridable: false }
+      aim: { type: string, description: The requirement as met., overridable: false }
+      fix: { type: string, description: The one-line fix., overridable: false }
+      source: { type: string, description: "Where the rule comes from: built into trellis, the estate's own pack file, or the source that brought it.", overridable: false }
+      pass: { type: number, description: Subjects that pass it., overridable: false }
+      fail: { type: number, description: "Subjects that fail it, open or announced.", overridable: false }
+      nodata: { type: number, title: No data, description: Subjects it could say nothing about., overridable: false }
+      na: { type: number, title: Not applicable, description: Subjects it does not apply to., overridable: false }
+      waived: { type: number, description: Failures a valid waiver sets aside., overridable: false }
+      overdue: { type: number, description: Its open findings past their deadline., overridable: false }
+      board: { type: url, title: On the board, overridable: false }
+    relations:
+      pillar: { target: pillar, many: false, title: Pillar, inverseTitle: Rules }
+
+  - id: waiver
+    title: Weighed waiver
+    group: Operations
+    icon: shield_check
+    description: >
+      One waiver trellis weighed, from any store: a waiver file in git, the catalog's own waiver
+      list, or a policy engine's exemptions. It says whether the waiver counts and, when not, why:
+      a waiver counts only with a reason, an owner, and an end within the estate's limit. Keyed by
+      store/rule/subject. Written by trellis every refresh.
+    canvas: { default: hidden }
+    lifecycle: { grace: { runs: 2, duration: 1h } }
+    fields:
+      rule: { type: string, chip: true, description: The rule waived., overridable: false }
+      subject: { type: string, description: The subject's key on the board., overridable: false }
+      status: { type: enum, values: [active, ending, ended, rejected], chip: true, colors: { active: green, ending: yellow, ended: grey, rejected: red }, description: "active, ending (within the estate's warning), ended, or rejected (it does not count).", overridable: false }
+      problem: { type: string, description: Why a rejected waiver does not count., overridable: false }
+      reason: { type: string, description: Why the exception was granted., overridable: false }
+      category: { type: enum, values: [accepted, mitigated], chip: true, description: "accepted risk, which ends on its expiry, or mitigated, where a named control stands in until a review.", overridable: false }
+      owner: { type: string, chip: true, description: Who answers for the exception., overridable: false }
+      control: { type: string, description: What stands in for the rule when it is mitigated., overridable: false }
+      ends: { type: datetime, description: When it stops counting., overridable: false }
+      expires_at: { type: datetime, title: Expires, overridable: false }
+      review_at: { type: datetime, title: Review, overridable: false }
+      granted_at: { type: datetime, title: Granted, overridable: false }
+      match: { type: string, description: "The text a finding's detail must hold for it to be covered, when it names one.", overridable: false }
+      source: { type: string, chip: true, description: The store trellis read it from., overridable: false }
+      id: { type: string, title: Granted as, description: "Its id where it was granted, such as a policy engine's exemption id.", overridable: false }
+      covers: { type: number, description: Findings it sets aside now., overridable: false }
+      board: { type: url, title: On the board, overridable: false }

@@ -1,0 +1,51 @@
+# The catalog pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+app: &app { description: Runs the jobs., repo: https://github.com/example/app, owner: user@example.com, tier: standard, lifecycle: active, runs: 2, runbook: https://example.test/runbook, docs: https://example.test/docs, notes: Why it exists. }
+program: &program { description: The platform., team: platform, services: 3, workloads: 1, lifecycle: active }
+rules:
+  app.undescribed:
+    fail: { app: { <<: *app, description: "" } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, description: null } }
+  app.no-repository:
+    fail: { app: { <<: *app, repo: "" } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, repo: null } }
+  app.no-owner:
+    fail: { app: { <<: *app, owner: "" } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, owner: null } }
+  app.unclassified:
+    fail: { app: { <<: *app, lifecycle: "" } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, tier: null } }
+  app.unseen:
+    fail: { app: { <<: *app, runs: 0 } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, runs: null } }
+  app.no-runbook:
+    fail: { app: { <<: *app, runbook: "" } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, runbook: null } }
+  app.no-docs:
+    fail: { app: { <<: *app, docs: "" } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, docs: null } }
+  app.no-notes:
+    fail: { app: { <<: *app, notes: "" } }
+    pass: { app: *app }
+    nodata: { app: { <<: *app, notes: null } }
+  program.undescribed:
+    fail: { program: { <<: *program, description: "" } }
+    pass: { program: *program }
+    nodata: { program: { <<: *program, description: null } }
+  program.no-owner:
+    fail: { program: { <<: *program, team: "" } }
+    pass: { program: *program }
+    nodata: { program: { <<: *program, team: null } }
+  program.empty:
+    fail: { program: { <<: *program, services: 0, workloads: 0 } }
+    pass: { program: *program }
+    nodata: { program: { <<: *program, workloads: null } }

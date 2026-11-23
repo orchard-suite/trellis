@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/orchard-suite/trellis/trellis.schema.json",
+  "title": "trellis.yaml",
+  "description": "One service's telemetry declaration. trellis checks the service against the telemetry standard from it and renders its dashboard and alert rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "service",
+    "namespace",
+    "host",
+    "runtime",
+    "edge"
+  ],
+  "properties": {
+    "service": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "The service name: the repository's name, also its OTEL_SERVICE_NAME and Prometheus job."
+    },
+    "title": {
+      "type": "string",
+      "description": "How people write the name, such as WorldView. Defaults to the service name."
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "The Kubernetes namespace the service runs in."
+    },
+    "container": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "The container name when it is not the service name."
+    },
+    "host": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+      "description": "The site's host, such as app.example.com."
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^/\\S*$"
+      },
+      "description": "Route patterns the service must report request durations for."
+    },
+    "page": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when the service has a page that runs the Faro SDK as <service>-web."
+    },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "go",
+        "node",
+        "rust",
+        "python"
+      ]
+    },
+    "edge": {
+      "type": "string",
+      "enum": [
+        "traefik",
+        "cloudflare",
+        "both"
+      ],
+      "description": "What sits in front of the service."
+    },
+    "public": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when the site is on the internet and reports views to /api/view."
+    },
+    "max_label_values": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 50,
+      "description": "How many values one label may take before the cardinality clause fails."
+    }
+  }
+}

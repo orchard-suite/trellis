@@ -1,0 +1,175 @@
+pack: catalog
+title: Catalog
+about: What the estate runs is described, owned, and operable
+version: 1.0.0
+family: platform
+# An app is what the estate runs and someone answers for; a program is a
+# body of work that holds apps. Described is written down and placed;
+# owned is answered for and classified; operable is ready for the night
+# it breaks. A subject reaches a tier when no counted rule of it or below
+# fails or lacks data.
+tiers: [described, owned, operable]
+
+scopes:
+  # An app that runs or should: not one still planned, not one retired.
+  live_app: '!(app.lifecycle in ["planned", "retired"])'
+  live_program: '!(program.lifecycle in ["planned", "retired"])'
+
+rules:
+  - id: app.undescribed
+    title: App has no description
+    aim: App has a description
+    kind: app
+    severity: medium
+    tier: described
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_app
+    needs: { app.description: the catalog did not say }
+    check: app.description != ""
+    detail: '"nobody wrote down what it does or who it is for"'
+    fix: Write what the app does and who it is for in its catalog description.
+
+  - id: app.no-repository
+    title: App links to no repository
+    aim: App links to a repository
+    kind: app
+    severity: medium
+    tier: described
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_app
+    needs: { app.repo: the catalog did not say }
+    check: app.repo != ""
+    detail: '"the catalog does not say where its code or its deployment lives"'
+    fix: Set the app's repository to where its code or its deployment is kept.
+
+  - id: app.no-owner
+    title: App has no owner
+    aim: App has an owner
+    kind: app
+    severity: high
+    tier: owned
+    standard: anything-stood-up-outside-the-platform-s-oversight-is-handed
+    pillar: platform/catalog
+    scope: live_app
+    needs: { app.owner: the catalog did not say }
+    check: app.owner != ""
+    detail: '"nobody answers for it"'
+    fix: Set the person or team that answers for the app as its owner.
+
+  - id: app.unclassified
+    title: App has no tier or lifecycle
+    aim: App has a tier and a lifecycle
+    kind: app
+    severity: medium
+    tier: owned
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_app
+    needs:
+      app.tier: the catalog did not say
+      app.lifecycle: the catalog did not say
+    check: app.tier != "" && app.lifecycle != ""
+    detail: '[app.tier == "" ? "no tier" : "", app.lifecycle == "" ? "no lifecycle" : ""].filter(s, s != "").join(" and ")'
+    fix: Set how much it matters when the app is down (tier) and where it is in its life (lifecycle).
+
+  - id: app.unseen
+    title: Nothing discovered runs the app
+    aim: Something discovered runs the app
+    kind: app
+    severity: medium
+    tier: owned
+    standard: draw-relations-only-from-evidence
+    pillar: platform/catalog
+    scope: live_app
+    needs: { app.runs: the catalog did not say }
+    check: app.runs > 0
+    detail: '"no cluster workload or virtual machine the catalog discovered points at it"'
+    fix: Label what runs it with the app (the cluster's workload label, or the VM's), so discovery links the two; retire the app if nothing does.
+
+  - id: app.no-runbook
+    title: App has no runbook
+    aim: App has a runbook
+    kind: app
+    severity: low
+    tier: operable
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_app
+    needs: { app.runbook: the catalog did not say }
+    check: app.runbook != ""
+    detail: '"nothing says what to do when it breaks"'
+    fix: Write a runbook for the app's failures and link it as its runbook.
+
+  - id: app.no-docs
+    title: App links to no documentation
+    aim: App links to documentation
+    kind: app
+    severity: low
+    tier: operable
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_app
+    needs: { app.docs: the catalog did not say }
+    check: app.docs != ""
+    detail: '"no documentation link"'
+    fix: Link the app's documentation, such as its README or its architecture decision.
+
+  - id: app.no-notes
+    title: App has no operator notes
+    aim: App has operator notes
+    kind: app
+    severity: low
+    tier: operable
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_app
+    needs: { app.notes: the catalog did not say }
+    check: app.notes != ""
+    detail: '"nothing says why it exists or what breaks if it goes"'
+    fix: Write in its notes why the app exists and what breaks if it goes.
+
+  - id: program.undescribed
+    title: Program has no description
+    aim: Program has a description
+    kind: program
+    severity: medium
+    tier: described
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_program
+    needs: { program.description: the catalog did not say }
+    check: program.description != ""
+    detail: '"nobody wrote down what it is for"'
+    fix: Write what the program is for in its catalog description.
+
+  - id: program.no-owner
+    title: Program is owned by no team
+    aim: Program is owned by a team
+    kind: program
+    severity: medium
+    tier: owned
+    standard: anything-stood-up-outside-the-platform-s-oversight-is-handed
+    pillar: platform/catalog
+    scope: live_program
+    needs: { program.team: the catalog did not say }
+    check: program.team != ""
+    detail: '"no team answers for it"'
+    fix: Relate the program to the team that answers for it.
+
+  - id: program.empty
+    title: Program holds nothing
+    aim: Program holds something
+    kind: program
+    severity: low
+    tier: owned
+    standard: read-the-catalog-first-and-keep-it-complete
+    pillar: platform/catalog
+    scope: live_program
+    needs:
+      program.services: the catalog did not say
+      program.workloads: the catalog did not say
+    check: program.services + program.workloads > 0
+    detail: '"no service or app belongs to it"'
+    fix: Relate the program's services and apps to it, or retire the program.

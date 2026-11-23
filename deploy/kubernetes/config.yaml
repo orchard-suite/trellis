@@ -1,0 +1,63 @@
+# An estate's settings. Every source is optional; list the ones the estate
+# has, catalog first. Secrets are ${NAME}, from the Secret trellis-secrets.
+estate: example
+public_url: https://trellis.example.org
+refresh: 15m
+sign_in:
+  mode: headers                 # the sign-in proxy's headers
+  email_header: X-Forwarded-Email
+  groups_header: X-Forwarded-Groups
+  roles: []                     # empty admits anyone the proxy signed in
+packs:
+  dir: /etc/trellis/packs       # the estate's own packs and tuning.yaml, beside the built-in ones
+  on: [security, build, interfaces, example]
+# How the estate, each pack, kind, pillar, and owner take a level: red for
+# any critical finding, else by the share of judged subjects that are green.
+rollup: { mode: share, green: 95, amber: 80 }
+# How long an open finding may stay open, by severity, from when it was
+# first seen.
+deadlines: { critical: 7d, high: 30d, medium: 90d, low: 180d }
+# Who answers for a subject: CEL over its facts and linked subjects, by kind.
+owners:
+  storage_account: azure.?tags.?owner.orValue("")
+  "*": '"platform"'
+# The longest a waiver may run, by the severity of the rule it covers, and
+# how early its end is announced.
+waivers:
+  max_days: { critical: 30, high: 90, medium: 180, low: 365 }
+  warn_days: 14
+sources:
+  - type: kubernetes
+    cluster: example
+  - type: github
+    owners: [example]
+    token: ${GITHUB_TOKEN}
+    max_age: 6h                 # carry a tree it could not read for six hours
+  - type: azure_graph           # needs the pod's Azure workload identity, with Reader
+    queries:
+      - kind: storage_account
+        query: >-
+          Resources | where type =~ 'microsoft.storage/storageaccounts'
+          | project id, name, minimumTlsVersion = tostring(properties.minimumTlsVersion),
+            publicAccess = tobool(properties.allowBlobPublicAccess)
+  # Azure Policy's rules, verdicts, and exemptions, passed through. Its
+  # identity needs Reader at each management group. List it after the
+  # catalog source, so a resource the catalog holds and no policy judges
+  # is outside every Azure rule.
+  # - type: azure_policy
+  #   max_age: 48h
+  #   management_groups: [<root management group id>]
+  #   tiers: [baseline, hardened]
+  #   tuning: { default: { severity: medium, tier: baseline } }
+  #   exemptions: { owner: owner, control: control }
+  # A request desk's program file and its lanes and runners in the hub,
+  # for the graft pack: add graft to packs.on with it.
+  # - type: graft
+  #   program_file: /etc/trellis/graft/program.yaml
+  #   hub: https://orrery.example.org
+  #   token: ${ORRERY_TOKEN}
+  - type: waivers
+    file: /etc/trellis/config/waivers.yaml
+sinks:
+  webhook:
+    url: ${FINDINGS_WEBHOOK_URL}

@@ -1,0 +1,26 @@
+# trellis for any cluster: a base to copy or point a kustomization at.
+# Change config.yaml for the estate, put the estate's own packs and their
+# fixtures in packs/, and give the Secret trellis-secrets the values the
+# config names as ${NAME}. Put a sign-in proxy in front of the Service
+# trellis and let only that proxy reach it; the Service trellis-health
+# answers the probes and trusts nothing.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: trellis
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - deployment.yaml
+  - service.yaml
+configMapGenerator:
+  - name: trellis-config
+    files:
+      - config.yaml
+      - waivers.yaml
+  - name: trellis-packs
+    files:
+      - packs/example.yaml
+      - packs/tuning.yaml
+images:
+  - name: ghcr.io/orchard-suite/trellis
+    newTag: 4.0.0

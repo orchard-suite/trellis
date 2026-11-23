@@ -1,0 +1,4 @@
+{"status":"success","data":{"resultType":"streams","result":[{"stream":{"app":"myapp","namespace":"myapps","container":"myapp"},"values":[
+ ["1793486527000000000","{\"ts\":\"2026-10-31T19:06:29.280Z\",\"level\":\"info\",\"event\":\"request.end\",\"path\":\"/mcp\"}"],
+ ["1793486526000000000","{\"timestamp\":\"2026-10-31T19:06:28.280Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"request\"},\"span\":{\"trace_id\":\"ced3d5615b5361441a2cad0d34658ec1\"}}"]
+]}]}}

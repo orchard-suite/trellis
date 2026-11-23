@@ -1,0 +1,13 @@
+# Judged with tuning.yaml, as the board judges: each case is a production
+# account, inside the scope the tuning narrows the pack to.
+now: 2026-11-04T00:00:00Z
+prod: &prod { env: prod }
+rules:
+  storage_account.tls:
+    fail: { azure: { tags: *prod, minimumTlsVersion: TLS1_0 } }
+    pass: { azure: { tags: *prod, minimumTlsVersion: TLS1_2 } }
+    nodata: { azure: { tags: *prod } }
+  storage_account.public:
+    fail: { azure: { tags: *prod, publicAccess: true } }
+    pass: { azure: { tags: *prod, publicAccess: false } }
+    nodata: { azure: { tags: *prod } }

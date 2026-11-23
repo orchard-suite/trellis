@@ -1,0 +1,4 @@
+{"status":"success","data":{"resultType":"streams","result":[{"stream":{"app":"myapp","namespace":"myapps","container":"myapp"},"values":[
+ ["1793486527000000000","{\"timestamp\":\"2026-10-31T19:06:29.280Z\",\"level\":\"info\",\"msg\":\"request\"}"],
+ ["1793486526000000000","2026/10/31 14:44:44 traces export: processor export timeout: retry-able request failure"]
+]}]}}

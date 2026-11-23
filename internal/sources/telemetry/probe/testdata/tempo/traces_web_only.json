@@ -1,0 +1,1 @@
+{"traces":[{"traceID":"523436c07c3fdae3695a53811f65747b","rootServiceName":"myapp-web","rootTraceName":"GET /api/items/{id}","startTimeUnixNano":"1793485901706000000","serviceStats":{"myapp-web":{"spanCount":1}}}],"metrics":{"inspectedBytes":"579263"}}

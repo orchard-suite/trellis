@@ -1,0 +1,148 @@
+pack: delivery
+title: Delivery
+about: What a repository's pipeline builds, and how it is built by hand
+version: 1.0.0
+family: platform
+tiers: [conformant]
+# Judged on the default branch's tree and its build files (the build fact).
+
+params:
+  # A runner that builds a desktop or mobile app: macOS, Windows, or iOS.
+  app_runners: '(?i)(^|[^a-z])(macos|windows|ios)([^a-z]|$)'
+  # A step that builds or ships a desktop or mobile app.
+  app_steps: '(?i)\bxcodebuild\b|\bfastlane\b|\baltool\b|\bnotarytool\b|gradlew\b[^\n]*\b(assemble|bundle)|electron-builder|electron-forge|tauri build|dotnet publish[^\n]*-r win'
+  # An action that builds or ships a desktop or mobile app.
+  app_actions: '(?i)^apple-actions/|testflight|^tauri-apps/tauri-action|^samuelmeuli/action-electron'
+  # A workflow that deploys a site, which a private repository may keep.
+  deploy_workflows: '(?i)(^|/)[^/]*(deploy|pages)[^/]*\.ya?ml$'
+  # A file that says something here is built.
+  buildable: '(^|/)(Dockerfile|go\.mod|package\.json|Cargo\.toml|pyproject\.toml|Package\.swift|build\.gradle(\.kts)?|[^/]+\.(csproj|sln|xcodeproj/project\.pbxproj))$'
+  # The order in which `make` picks its default among the platforms a
+  # repository has.
+  platform_order: [mac, ios, android, linux, windows]
+  # Targets that check or tidy rather than build and install.
+  not_builds: [test, check, lint, fmt, format, help, clean, tidy, vet]
+
+scopes:
+  # A repository someone builds from: not archived, not a fork, not empty.
+  built_repo: '!repo.archived && !repo.fork && !forge.empty'
+  # The same, kept private.
+  private_repo: '!repo.archived && !repo.fork && !forge.empty && forge.private'
+
+rules:
+  - id: delivery.private-app-build
+    title: A private repository's pipeline builds an app
+    aim: A private repository's pipeline builds no app
+    kind: repository
+    severity: medium
+    tier: conformant
+    standard: give-a-repository-a-pipeline-only-when-something-consumes-it
+    pillar: platform/golden_paths
+    scope: private_repo
+    from: 2026-11-22T00:00:00Z
+    needs:
+      forge.private: the forge did not say whether it is private
+      build.workflows: the workflows were not read
+    check: >-
+      !build.workflows.exists(w,
+        w.runs_on.exists(r, r.matches(params.app_runners)) ||
+        w.runs.exists(s, s.matches(params.app_steps)) ||
+        w.uses.exists(u, u.matches(params.app_actions)))
+    detail: >-
+      "a desktop or mobile app is built in " + build.workflows.filter(w,
+        w.runs_on.exists(r, r.matches(params.app_runners)) ||
+        w.runs.exists(s, s.matches(params.app_steps)) ||
+        w.uses.exists(u, u.matches(params.app_actions))).map(w, w.path).join(", ")
+    fix: Remove the app's jobs. A private app is built and installed with make where it runs, never in a pipeline.
+
+  - id: delivery.private-ci-unconsumed
+    title: A private repository has a pipeline nothing consumes
+    aim: A private repository has no pipeline nothing consumes
+    kind: repository
+    severity: low
+    tier: conformant
+    standard: give-a-repository-a-pipeline-only-when-something-consumes-it
+    pillar: platform/golden_paths
+    scope: private_repo
+    from: 2026-11-22T00:00:00Z
+    skip:
+      - { if: size(build.workflows) == 0, because: it has no pipeline }
+    needs:
+      forge.private: the forge did not say whether it is private
+      build.workflows: the workflows were not read
+      runs.folders: the catalog did not say what runs from here
+    check: >-
+      size(runs.folders) > 0 ||
+      "release-please-config.json" in forge.files ||
+      build.workflows.exists(w, w.path.matches(params.deploy_workflows))
+    detail: '"nothing the estate runs is built here, and it publishes no version or site, yet it runs " + build.workflows.map(w, w.path).join(", ")'
+    fix: Delete the workflows. A private repository keeps a pipeline only to publish what something consumes.
+
+  - id: delivery.makefile
+    title: No Makefile at the root
+    aim: Has a Makefile at the root
+    kind: repository
+    severity: medium
+    tier: conformant
+    standard: give-every-repository-the-same-make-targets-and-make-them-in
+    pillar: platform/golden_paths
+    scope: built_repo
+    from: 2026-11-22T00:00:00Z
+    skip:
+      - { if: '!(size(build.apps) > 0 || forge.files.exists(f, f.matches(params.buildable)))', because: nothing here is built }
+    needs:
+      forge.files: the tree was not read
+      build.make: the build files were not read
+    check: build.make.present
+    detail: '"the default branch has no Makefile at its root"'
+    fix: Add a Makefile whose default target builds and installs the primary target.
+
+  - id: delivery.app-targets
+    title: An app has no make target
+    aim: Every app has a make target
+    kind: repository
+    severity: medium
+    tier: conformant
+    standard: give-every-repository-the-same-make-targets-and-make-them-in
+    pillar: platform/golden_paths
+    scope: built_repo
+    from: 2026-11-22T00:00:00Z
+    skip:
+      - { if: size(build.apps) == 0, because: it builds no app }
+      - { if: '!build.make.present', because: it has no Makefile }
+    needs:
+      build.apps: the build files were not read
+      build.make: the build files were not read
+    check: build.apps.all(a, a.platform in build.make.targets)
+    detail: >-
+      "no make " + params.platform_order.filter(p,
+        build.apps.exists(a, a.platform == p) && !(p in build.make.targets)).join(", no make ")
+    fix: Add a target named for each platform the repository builds (mac, ios, android, windows) that builds the app and installs it.
+
+  - id: delivery.default-target
+    title: The default make target is not the primary build
+    aim: The default make target is the primary build
+    kind: repository
+    severity: low
+    tier: conformant
+    standard: give-every-repository-the-same-make-targets-and-make-them-in
+    pillar: platform/golden_paths
+    scope: built_repo
+    from: 2026-11-22T00:00:00Z
+    skip:
+      - { if: '!build.make.present', because: it has no Makefile }
+    needs:
+      build.make: the build files were not read
+      build.apps: the build files were not read
+    # With platforms, the default is the first of them in the order, or a
+    # target that runs it. Without, it must build: not a check or a tidy.
+    check: >-
+      size(params.platform_order.filter(p, p in build.make.targets || build.apps.exists(a, a.platform == p))) > 0
+        ? (build.make.default == params.platform_order.filter(p, p in build.make.targets || build.apps.exists(a, a.platform == p))[0] ||
+           params.platform_order.filter(p, p in build.make.targets || build.apps.exists(a, a.platform == p))[0] in build.make.deps[?build.make.default].orValue([]))
+        : (build.make.default != "" && !(build.make.default in params.not_builds))
+    detail: >-
+      size(params.platform_order.filter(p, p in build.make.targets || build.apps.exists(a, a.platform == p))) > 0
+        ? "make runs " + (build.make.default == "" ? "nothing" : build.make.default) + ", not " + params.platform_order.filter(p, p in build.make.targets || build.apps.exists(a, a.platform == p))[0]
+        : "make runs " + (build.make.default == "" ? "nothing" : build.make.default) + ", which builds nothing"
+    fix: Make the default target build and install the primary target, the first of mac, ios, android, linux, windows the repository has, or its container when that is all it builds.

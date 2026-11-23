@@ -1,0 +1,289 @@
+pack: telemetry
+title: Telemetry
+about: The telemetry contract
+version: 3.0.0
+family: platform
+# One tier: a service is in contract when no rule fails or lacks data, so
+# the catalog levels on the verdict and never counts missing data.
+tiers: [in_contract]
+# Each rule judges one measurement the telemetry source took from the
+# stores for a declared service: what the stores hold, with the queries
+# behind it. A measurement whose store could not be read carries an error
+# and says nothing. What a service is (its runtime, its edge, whether it
+# has a page or a public site) is the declaration, in telemetry.declaration.
+
+scopes:
+  node: telemetry.declaration.runtime == "node"
+  traefik: telemetry.declaration.edge in ["traefik", "both"]
+  public: telemetry.declaration.public
+  page: telemetry.declaration.page
+
+rules:
+  - id: telemetry.build-info
+    title: "build_info gauge with version"
+    aim: Exposes a build_info gauge with its version
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs: { telemetry.build_info: the service was not measured }
+    unknown: [{ if: has(telemetry.build_info.error), explain: telemetry.build_info.error }]
+    check: telemetry.build_info.series > 0 && telemetry.build_info.unversioned == 0
+    detail: >-
+      telemetry.build_info.series == 0
+        ? telemetry.build_info.metric + " is absent; the service exports no metrics or names itself differently"
+        : telemetry.build_info.metric + " has " + plural(telemetry.build_info.unversioned, "series", "series") + " with no version label"
+    evidence: telemetry.build_info.evidence
+    fix: "Export <service>_build_info with a version label, set from the release."
+
+  - id: telemetry.http-duration
+    title: "http.server.request.duration by route"
+    aim: Records http.server.request.duration by route
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs: { telemetry.http_duration: the service was not measured }
+    unknown: [{ if: has(telemetry.http_duration.error), explain: telemetry.http_duration.error }]
+    # A declared route with no series may only be quiet: it is missing when
+    # the edge passed it a request in the window and no duration came of it.
+    check: >-
+      telemetry.http_duration.reported && size(telemetry.http_duration.routes) > 0
+        && telemetry.http_duration.declared.all(r, r in telemetry.http_duration.routes || !(r in telemetry.http_duration.edge_hits) || telemetry.http_duration.edge_hits[r] == 0)
+    detail: >-
+      !telemetry.http_duration.reported
+        ? "http_server_request_duration_seconds is not reported"
+        : size(telemetry.http_duration.routes) == 0
+          ? "request durations carry no http_route; every request must be labelled with its route pattern"
+          : "declared routes not reported though the edge passed them requests: " + telemetry.http_duration.declared.filter(r, !(r in telemetry.http_duration.routes) && r in telemetry.http_duration.edge_hits && telemetry.http_duration.edge_hits[r] > 0).join(", ")
+    evidence: telemetry.http_duration.evidence
+    fix: "Instrument the HTTP server and name each route with its pattern, so durations carry http_route."
+
+  - id: telemetry.process-cpu
+    title: "process.cpu.time by state"
+    aim: Records process.cpu.time by state
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs: { telemetry.process_cpu: the service was not measured }
+    unknown: [{ if: has(telemetry.process_cpu.error), explain: telemetry.process_cpu.error }]
+    check: size(telemetry.process_cpu.values) > 0
+    detail: >-
+      telemetry.process_cpu.series == 0
+        ? telemetry.process_cpu.metric + " is not reported"
+        : telemetry.process_cpu.metric + " is reported without the " + telemetry.process_cpu.attribute + " attribute"
+    evidence: telemetry.process_cpu.evidence
+    fix: "Report the process's CPU time by state from the runtime."
+
+  - id: telemetry.process-memory
+    title: "process.memory.usage by kind"
+    aim: Records process.memory.usage by kind
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs: { telemetry.process_memory: the service was not measured }
+    unknown: [{ if: has(telemetry.process_memory.error), explain: telemetry.process_memory.error }]
+    check: size(telemetry.process_memory.values) > 0
+    detail: >-
+      telemetry.process_memory.series == 0
+        ? telemetry.process_memory.metric + " is not reported"
+        : telemetry.process_memory.metric + " is reported without the " + telemetry.process_memory.attribute + " attribute"
+    evidence: telemetry.process_memory.evidence
+    fix: "Report process.memory.usage with the kinds heap and total."
+
+  - id: telemetry.event-loop
+    title: "Node event loop delay p99 and max"
+    aim: Records Node event loop delay p99 and max
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    scope: node
+    needs: { telemetry.event_loop: the event loop was not measured }
+    unknown: [{ if: has(telemetry.event_loop.error), explain: telemetry.event_loop.error }]
+    check: size(telemetry.event_loop.missing) == 0
+    detail: '"not reported: " + telemetry.event_loop.missing.join(", ")'
+    evidence: telemetry.event_loop.evidence
+    fix: "Report the event loop delay histogram from perf_hooks as nodejs_eventloop_delay p99 and max."
+
+  - id: telemetry.logs-json
+    title: "logs are JSON lines"
+    aim: Logs are JSON lines
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs: { telemetry.logs: the service was not measured }
+    unknown: [{ if: has(telemetry.logs.error), explain: telemetry.logs.error }]
+    check: telemetry.logs.lines > 0 && telemetry.logs.not_json == 0
+    detail: >-
+      telemetry.logs.lines == 0
+        ? "no log lines in the window; the service logs nothing or its stream labels differ"
+        : "%d of %d lines are not JSON".format([int(telemetry.logs.not_json), int(telemetry.logs.lines)])
+          + (has(telemetry.logs.first_not_json) ? "; the first: " + telemetry.logs.first_not_json : "")
+    evidence: telemetry.logs.evidence
+    fix: "Write every log line to stdout as one JSON object; route a library's own printing through the app's logger."
+
+  - id: telemetry.logs-fields
+    title: "log lines carry timestamp, level, msg"
+    aim: Log lines carry timestamp, level, and msg
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs: { telemetry.logs: the service was not measured }
+    unknown: [{ if: has(telemetry.logs.error), explain: telemetry.logs.error }]
+    check: >-
+      telemetry.logs.lines > 0 && telemetry.logs.not_json == 0 && telemetry.logs.no_timestamp == 0
+        && telemetry.logs.no_level == 0 && telemetry.logs.no_message == 0
+    detail: >-
+      telemetry.logs.lines == 0
+        ? "no log lines in the window"
+        : "of %d lines, ".format([int(telemetry.logs.lines)]) + [
+            telemetry.logs.no_timestamp > 0 ? "%d lack timestamp".format([int(telemetry.logs.no_timestamp)]) : "",
+            telemetry.logs.no_level > 0 ? "%d lack level".format([int(telemetry.logs.no_level)]) : "",
+            telemetry.logs.no_message > 0 ? "%d lack msg or message".format([int(telemetry.logs.no_message)]) : "",
+            telemetry.logs.not_json > 0 ? "%d are not JSON".format([int(telemetry.logs.not_json)]) : ""
+          ].filter(p, p != "").join("; ")
+    evidence: telemetry.logs.evidence
+    fix: "Name the fields timestamp, level, and msg in the logger's settings."
+
+  - id: telemetry.logs-trace-id
+    title: "request logs carry trace_id"
+    aim: Request logs carry trace_id
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs: { telemetry.trace_ids: the service was not measured }
+    unknown: [{ if: has(telemetry.trace_ids.error), explain: telemetry.trace_ids.error }]
+    check: telemetry.trace_ids.lines > 0 && telemetry.trace_ids.traced > 0
+    detail: >-
+      telemetry.trace_ids.lines == 0
+        ? "no log lines in the window"
+        : "none of %d lines carries trace_id; lines inside a request or job must".format([int(telemetry.trace_ids.lines)])
+    evidence: telemetry.trace_ids.evidence
+    fix: "Log with the request's context so each line carries trace_id."
+
+  - id: telemetry.cardinality
+    title: "no high-cardinality labels"
+    aim: No high-cardinality labels
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    needs:
+      telemetry.cardinality: the service was not measured
+      telemetry.declaration.max_label_values: the declaration sets no bar
+    unknown: [{ if: has(telemetry.cardinality.error), explain: telemetry.cardinality.error }]
+    check: >-
+      telemetry.cardinality.series > 0
+        && telemetry.cardinality.widest.all(w, w.values <= telemetry.declaration.max_label_values)
+    detail: >-
+      telemetry.cardinality.series == 0
+        ? "the service has no series at all"
+        : "more than %d values: ".format([int(telemetry.declaration.max_label_values)])
+          + telemetry.cardinality.widest.filter(w, w.values > telemetry.declaration.max_label_values)
+              .map(w, "%s{%s} has %d values".format([w.metric, w.label, int(w.values)])).join("; ")
+    evidence: telemetry.cardinality.evidence
+    fix: "Drop the label or bound it to a fixed set; never an id, a path, or a person."
+
+  - id: telemetry.edge-router
+    title: "edge router sees the host"
+    aim: The edge router sees the host
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    scope: traefik
+    needs: { telemetry.edge_router: the edge router was not measured }
+    unknown:
+      - { if: "!telemetry.edge_router.configured", because: "the edge router's counter is not configured" }
+      - { if: has(telemetry.edge_router.error), explain: telemetry.edge_router.error }
+    check: telemetry.edge_router.routers > 0
+    detail: '"the cluster''s Traefik has no router for the host; the Ingress is missing or named differently"'
+    evidence: telemetry.edge_router.evidence
+    fix: "Give the host an Ingress on the edge's ingress class, so the edge routes and counts it."
+
+  - id: telemetry.edge-views
+    title: "public page reports views"
+    aim: The public page reports views
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    scope: public
+    # A page nobody opened sends no views, so their absence proves nothing.
+    skip: [{ if: telemetry.edge_views.views == 0 && telemetry.page_loads.configured && !has(telemetry.page_loads.error) && telemetry.page_loads.loads == 0, because: no one opened the page in the window }]
+    needs: { telemetry.edge_views: the views were not measured }
+    unknown:
+      - { if: "!telemetry.edge_views.configured", because: "the edge's access log or the view beacon is not configured" }
+      - { if: has(telemetry.edge_views.error), explain: telemetry.edge_views.error }
+      - if: telemetry.edge_views.views == 0 && (!has(telemetry.page_loads) || has(telemetry.page_loads.error) || !telemetry.page_loads.configured)
+        because: whether anyone opened the page in the window is not known
+    check: telemetry.edge_views.views > 0
+    detail: '"no " + telemetry.edge_views.beacon + " report reached the edge in the window, though the page was loaded"'
+    evidence: telemetry.edge_views.evidence + telemetry.page_loads.evidence
+    fix: "Have the public page post one view per load to the view beacon the estate's edge counts."
+
+  - id: telemetry.browser-logs
+    title: "browser app in the log store"
+    aim: The browser app is in the log store
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    scope: page
+    skip: [{ if: telemetry.browser_logs.lines == 0 && telemetry.page_loads.configured && !has(telemetry.page_loads.error) && telemetry.page_loads.loads == 0, because: no one opened the page in the window }]
+    needs: { telemetry.browser_logs: the browser app was not measured }
+    unknown:
+      - { if: has(telemetry.browser_logs.error), explain: telemetry.browser_logs.error }
+      - if: telemetry.browser_logs.lines == 0 && (!has(telemetry.page_loads) || has(telemetry.page_loads.error) || !telemetry.page_loads.configured)
+        because: whether anyone opened the page in the window is not known
+    check: telemetry.browser_logs.lines > 0
+    detail: '"no browser lines for " + telemetry.browser_logs.app + " in the window, though the page was loaded"'
+    evidence: telemetry.browser_logs.evidence + telemetry.page_loads.evidence
+    fix: "Run the browser SDK on the page as <service>-web and relay it through the app's own server."
+
+  - id: telemetry.browser-trace
+    title: "a trace spans browser and server"
+    aim: A trace spans browser and server
+    kind: service
+    severity: medium
+    tier: in_contract
+    standard: make-the-observability-standard-a-tool-not-prose
+    pillar: platform/observability
+    scope: page
+    skip:
+      - if: >-
+          size(telemetry.browser_trace.joined) == 0 && telemetry.browser_trace.web == 0
+            && telemetry.page_loads.configured && !has(telemetry.page_loads.error) && telemetry.page_loads.loads == 0
+        because: no one opened the page in the window
+    needs: { telemetry.browser_trace: the browser's traces were not measured }
+    unknown:
+      - { if: has(telemetry.browser_trace.error), explain: telemetry.browser_trace.error }
+      - if: >-
+          size(telemetry.browser_trace.joined) == 0 && telemetry.browser_trace.web == 0
+            && (!has(telemetry.page_loads) || has(telemetry.page_loads.error) || !telemetry.page_loads.configured)
+        because: whether anyone opened the page in the window is not known
+    check: size(telemetry.browser_trace.joined) > 0
+    detail: >-
+      telemetry.browser_trace.web == 0
+        ? "the browser sends no spans at all; the page's tracing instrumentation is missing, or two copies of @opentelemetry/api are bundled"
+        : "browser spans exist but none continues on the server; the server does not continue traceparent, or ignoreUrls covers its API"
+    evidence: telemetry.browser_trace.evidence
+    fix: "Trace the page and continue traceparent on the server; keep the API out of the SDK's ignored URLs."

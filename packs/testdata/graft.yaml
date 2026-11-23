@@ -1,0 +1,95 @@
+# The graft pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+# The desk's own hub source, so a runner that names another one fails.
+params:
+  graft: { desk_sources: [desk-tools] }
+
+# A lane as the program file gives it, and its hub action as the hub does.
+lanes:
+  user: &user { program: acme, id: user, rank: 0, lowest: true, protected: false, review: false, small_fix: false, outside: true, action: graft_acme_user }
+  developer: &developer { program: acme, id: developer, rank: 1, lowest: false, protected: false, review: false, small_fix: true, outside: false, action: graft_acme_developer }
+  architect: &architect { program: acme, id: architect, rank: 2, lowest: false, protected: true, review: true, small_fix: false, outside: false, action: graft_acme_architect }
+actions:
+  owned: &owned { hub: hub.example.test, id: graft_acme_developer, exists: true, everyone: false, grants: 0, audiences: 0, home: false, approval: none, rules: [{ who: false, owns: true, where: false, approval: none }], tiers: [read] }
+  bare: &bare { hub: hub.example.test, id: graft_acme_user, exists: true, everyone: false, grants: 0, audiences: 0, home: false, approval: none, rules: [{ who: true, owns: false, where: false, approval: other }], tiers: [] }
+  unread: &unread { hub: hub.example.test, id: graft_acme_developer, exists: true }
+runners:
+  reader_prod: &reader_prod { program: acme, name: reader, tier: production, id: acme-reader-prod, twin: acme-reader-nonprod }
+  serving: &serving { hub: hub.example.test, id: acme-reader-prod, exists: true, class: runner, serves: true, tiers: [read], sources: [desk-tools], on: true, on_blueprint: repository }
+  serving_unread: &serving_unread { hub: hub.example.test, id: acme-reader-prod, exists: true, serves: true }
+
+rules:
+  graft.lane-action-missing:
+    fail: { graft_lane: *developer, lane_action: { hub: hub.example.test, id: graft_acme_developer, exists: false } }
+    pass: { graft_lane: *developer, lane_action: *owned }
+    nodata: { graft_lane: *developer }
+  graft.lane-open:
+    fail: { graft_lane: *developer, lane_action: { <<: *owned, rules: [{ who: false, owns: false, where: true, approval: none }] } }
+    pass: { graft_lane: *developer, lane_action: *owned }
+    nodata: { graft_lane: *developer, lane_action: *unread }
+  graft.lane-unheld:
+    fail: { graft_lane: *developer, lane_action: { <<: *owned, rules: [] } }
+    pass: { graft_lane: *developer, lane_action: *owned }
+    nodata: { graft_lane: *developer, lane_action: *unread }
+  graft.lane-data-tier:
+    fail: { graft_lane: *developer, lane_action: { <<: *owned, tiers: [read, data] } }
+    pass: { graft_lane: *developer, lane_action: *owned }
+    nodata: { graft_lane: *developer, lane_action: *unread }
+  graft.lane-outside-tier:
+    fail: { graft_lane: *user, lane_action: { <<: *bare, tiers: [read] } }
+    pass: { graft_lane: *user, lane_action: *bare }
+    nodata: { graft_lane: *user, lane_action: { hub: hub.example.test, id: graft_acme_user, exists: true } }
+  graft.lane-protected-unapproved:
+    fail: { graft_lane: *architect, lane_action: { <<: *owned, id: graft_acme_architect } }
+    pass: { graft_lane: *architect, lane_action: { <<: *owned, id: graft_acme_architect, rules: [{ who: false, owns: true, where: false, approval: self }] } }
+    nodata: { graft_lane: *architect, lane_action: { hub: hub.example.test, id: graft_acme_architect, exists: true } }
+  graft.lane-outside-flags:
+    fail: { graft_lane: { <<: *user, small_fix: true } }
+    pass: { graft_lane: *user }
+    nodata: {}
+  graft.runner-missing:
+    fail: { graft_runner: *reader_prod, runner_source: { hub: hub.example.test, id: acme-reader-prod, exists: false } }
+    pass: { graft_runner: *reader_prod, runner_source: *serving }
+    nodata: { graft_runner: *reader_prod }
+  graft.runner-serves-anywhere:
+    fail: { graft_runner: *reader_prod, runner_source: { <<: *serving, on: false, on_blueprint: "" } }
+    pass: { graft_runner: *reader_prod, runner_source: *serving }
+    nodata: { graft_runner: *reader_prod, runner_source: *serving_unread }
+  graft.runner-serves-source:
+    fail: { graft_runner: *reader_prod, runner_source: { <<: *serving, sources: [other-tools] } }
+    pass: { graft_runner: *reader_prod, runner_source: *serving }
+    nodata: { graft_runner: *reader_prod, runner_source: *serving_unread }
+  graft.runner-shared:
+    fail: { graft_runner: { <<: *reader_prod, twin: acme-reader-prod } }
+    pass: { graft_runner: *reader_prod }
+    nodata: {}
+  graft.runner-reader-acts:
+    fail: { graft_runner: *reader_prod, runner_source: { <<: *serving, tiers: [read, act] } }
+    pass: { graft_runner: *reader_prod, runner_source: *serving }
+    nodata: { graft_runner: *reader_prod, runner_source: *serving_unread }
+  graft.runner-data:
+    fail: { graft_runner: *reader_prod, runner_source: { <<: *serving, tiers: [read, data] } }
+    pass: { graft_runner: *reader_prod, runner_source: *serving }
+    nodata: { graft_runner: *reader_prod, runner_source: *serving_unread }
+  graft.repository-unprotected:
+    fail: { graft_repository: { program: acme, path: acme/api, entity: "repository:acme-api", protected: [] } }
+    pass: { graft_repository: { program: acme, path: acme/api, entity: "repository:acme-api", protected: [infrastructure/] } }
+    nodata: {}
+  graft.small-fix-lines:
+    fail: { graft_program: { name: acme, small_fix_lines: 600, spend_usd: 5 } }
+    pass: { graft_program: { name: acme, small_fix_lines: 150, spend_usd: 5 } }
+    nodata: {}
+  graft.spend-cap:
+    fail: { graft_program: { name: acme, small_fix_lines: 150, spend_usd: 40 } }
+    pass: { graft_program: { name: acme, small_fix_lines: 150, spend_usd: 5 } }
+    nodata: {}
+  graft.trusted:
+    fail: { graft_program: { name: acme, trusted: true } }
+    pass: { graft_program: { name: acme, trusted: false } }
+    nodata: {}
+  graft.hours-unset:
+    fail: { graft_program: { name: acme, unreviewed_lanes: [user, developer], review_lanes: [architect], hours_schedule: "" } }
+    pass: { graft_program: { name: acme, unreviewed_lanes: [user, developer], review_lanes: [architect], hours_schedule: platform } }
+    nodata: { graft_program: { name: acme } }

@@ -1,0 +1,42 @@
+# trellis reads the cluster to judge how each workload runs: pods and the
+# owners that explain them, namespaces, NetworkPolicies, and the policy
+# engine's reports. Read-only, cluster-wide, nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trellis
+  namespace: trellis
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: trellis-reader
+rules:
+  - apiGroups: [""]
+    resources: [pods, namespaces]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list]
+  - apiGroups: [wgpolicyk8s.io]
+    resources: [policyreports, clusterpolicyreports]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: trellis-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: trellis-reader
+subjects:
+  - kind: ServiceAccount
+    name: trellis
+    namespace: trellis

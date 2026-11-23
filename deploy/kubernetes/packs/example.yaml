@@ -1,0 +1,42 @@
+# An estate's own pack: Azure storage accounts accept only TLS 1.2 and keep
+# blobs private. `trellis test -packs-dir packs` holds it to its fixtures.
+# It shows the shape of an estate's pack for an estate with no policy
+# engine of its own. One engine per property: an estate whose Azure Policy
+# judges these settings reads Azure's verdicts through the azure_policy
+# source and deletes rules like these.
+pack: example
+title: Cloud storage
+about: The estate's storage accounts
+version: 1.0.0
+family: security
+tiers: [baseline, hardened]
+scopes:
+  # Every account unless the estate's tuning narrows it.
+  production: "true"
+rules:
+  - id: storage_account.tls
+    title: Accepts TLS older than 1.2
+    kind: storage_account
+    severity: high
+    standard: encrypt-data-in-transit
+    pillar: platform/security
+    controls: ["soc2:CC6.7", "iso27001:A.8.24"]
+    tier: baseline
+    scope: production
+    needs: { azure.minimumTlsVersion: the account's TLS setting was not read }
+    check: azure.minimumTlsVersion == "TLS1_2" || azure.minimumTlsVersion == "TLS1_3"
+    detail: '"accepts " + azure.minimumTlsVersion'
+    fix: Set the account's minimum TLS version to 1.2.
+  - id: storage_account.public
+    title: Lets blobs be read without a sign-in
+    kind: storage_account
+    severity: medium
+    standard: least-privilege-by-default
+    pillar: platform/security
+    controls: ["soc2:CC6.1"]
+    tier: hardened
+    scope: production
+    needs: { azure.publicAccess: the account's public access setting was not read }
+    check: "!azure.publicAccess"
+    detail: '"anonymous blob reads are allowed"'
+    fix: Turn off blob public access on the account.

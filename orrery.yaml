@@ -1,0 +1,28 @@
+# What this repository builds: the service, the APIs it provides, and the
+# APIs it calls. trellis never writes this itself. The forge reader of an
+# estate that reads this repository writes the service and its APIs, so an
+# estate that runs trellis without reading this repository does not list it.
+# `fields` and `relations` place it in an estate's platform pillars; an API
+# key is the providing service's key and its id.
+service: github/orchard-suite/trellis/cmd/trellis
+icon:
+  name: trellis
+  file: logo.svg
+fields:
+  category: Conformance
+relations:
+  pillars:
+  - platform/security
+  - platform/observability
+  - platform/golden_paths
+  - platform/catalog
+  - platform/interfaces
+consumes:
+- github/orchard-suite/orrery/catalog
+- github/prometheus/prometheus/query
+- github/grafana/loki/query
+- github/grafana/tempo/query
+- github/kyverno/kyverno/policy-reports
+- github/api
+- github/ghcr
+- azure/key-vault

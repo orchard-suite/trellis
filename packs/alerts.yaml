@@ -1,0 +1,79 @@
+pack: alerts
+title: Alerts
+about: Whether each alert rule can fire, and lands where it belongs
+version: 1.0.0
+family: platform
+# Judged on every alerting rule a Prometheus has loaded, read by the
+# alertrules source. A rule that is wrong looks the same as a healthy
+# system: it stays silent, or it fires without a home. So the rules
+# themselves are checked, not only what they watch.
+tiers: [sound]
+
+params:
+  # Labels that say where a series comes from, not what it measures. A
+  # selector that matches nothing is broken when its metric never existed,
+  # or when a matcher on one of these selects nothing of it; a matcher on
+  # any other label, such as outcome="failed", may just not have happened.
+  place_labels: [job, namespace, service, app, container, cluster]
+  # The labels an incident desk files an alert by, in its order. An alert
+  # that carries none of them, from its own labels or from its query, lands
+  # on no workload.
+  workload_labels: [service, app, namespace, job]
+  # Labels that change when the thing they describe moves: the node it runs
+  # on, its pod, the scrape target. A long wait on them starts over at
+  # every move.
+  # A probe's instance is its target, which does not move, so instance is
+  # not here.
+  moving_labels: [node, pod]
+  # A wait at least this long, in seconds, is long enough for everyday
+  # churn (a rollout, a pod moved off a node) to restart it.
+  long_wait_seconds: 43200
+
+rules:
+  - id: alerts.selector-empty
+    title: Selects series that do not exist
+    aim: Selects only series that exist
+    kind: alert_rule
+    severity: high
+    tier: sound
+    standard: alert-rules-as-files-in-git-delivered-into-the-house-with-no
+    pillar: platform/observability
+    unknown: [{ if: has(alert.parse_error), explain: '"the query does not parse: " + alert.parse_error' }]
+    needs: { alert.selectors: the rule's selectors were not read }
+    check: >-
+      alert.selectors.all(s, has(s.error) || s.optional || s.series > 0 ||
+        (s.metric_series > 0 && s.matchers.all(m, !(m.label in params.place_labels) || m.series > 0)))
+    detail: >-
+      "selects nothing that exists: " + alert.selectors.filter(s, !has(s.error) && !s.optional && s.series == 0 &&
+        (s.metric_series == 0 || s.matchers.exists(m, m.label in params.place_labels && m.series == 0))).map(s, s.selector).join(", ")
+    fix: Correct the selector's metric name or labels to what Prometheus has, such as the scrape job's namespace rather than the workload's; a rule that matches nothing never fires, or fires for ever under absent().
+
+  - id: alerts.no-workload
+    title: Lands on no workload
+    aim: Lands on a workload
+    kind: alert_rule
+    severity: medium
+    tier: sound
+    standard: alert-rules-as-files-in-git-delivered-into-the-house-with-no
+    pillar: platform/observability
+    unknown: [{ if: has(alert.parse_error), explain: '"the query does not parse: " + alert.parse_error' }]
+    needs: { alert.keeps: the rule's query was not read }
+    check: params.workload_labels.exists(l, l in alert.labels || l in alert.keeps)
+    detail: '"its alerts carry none of " + params.workload_labels.join(", ")'
+    fix: Add namespace (or service) under the rule's labels, or keep one in the query's by (...); an aggregation without by drops every label.
+
+  - id: alerts.moving-wait
+    title: Long wait on a label that moves
+    aim: No long wait on a label that moves
+    kind: alert_rule
+    severity: medium
+    tier: sound
+    standard: alert-rules-as-files-in-git-delivered-into-the-house-with-no
+    pillar: platform/observability
+    unknown: [{ if: has(alert.parse_error), explain: '"the query does not parse: " + alert.parse_error' }]
+    needs:
+      alert.for_seconds: the rule's wait was not read
+      alert.may_keep: the rule's query was not read
+    check: alert.for_seconds < params.long_wait_seconds || !params.moving_labels.exists(l, l in alert.may_keep)
+    detail: '"waits %d seconds on alerts that may carry %s".format([alert.for_seconds, params.moving_labels.filter(l, l in alert.may_keep).join(", ")])'
+    fix: Aggregate the moving labels away, such as max by (volume, ...) (...), so the wait follows the thing and not where it runs.

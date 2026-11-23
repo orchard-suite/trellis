@@ -1,0 +1,162 @@
+pack: interfaces
+title: Interfaces
+about: One shape for every API
+version: 3.0.0
+family: platform
+# Defined: the API names a definition that reads, and no release breaks a
+# caller. Shaped: the definition has the one shape every API shares.
+tiers: [defined, shaped]
+# Each API a service built here offers names its machine-readable
+# definition, and the definition has one shape: versioned, signed in,
+# one error shape, every operation named and described. An MCP server
+# lists its own tools and a web page is for people, so neither is judged.
+# The shape rules read OpenAPI; a definition in another language is no
+# data for them.
+
+scopes:
+  # An HTTP API the shape rules mean something for. An MCP server lists its
+  # own tools and a web page is for people.
+  http_api: 'api.kind != "mcp" && api.kind != "web"'
+
+rules:
+  - id: api.definition
+    title: Names no definition
+    aim: Names a definition
+    kind: api
+    severity: medium
+    tier: defined
+    standard: one-shape-for-every-product-s-interface
+    pillar: platform/interfaces
+    scope: http_api
+    needs: { api.kind: the catalog names no kind, api.spec: the catalog was not read }
+    check: api.spec != ""
+    detail: '"the catalog names no definition for this " + api.kind + " API"'
+    fix: "Add spec to the API in the service's orrery.yaml: the path of its OpenAPI, AsyncAPI, protobuf, or GraphQL file in the repository."
+
+  - id: api.definition-unread
+    title: Definition cannot be read
+    aim: Definition can be read
+    kind: api
+    severity: high
+    tier: defined
+    standard: one-shape-for-every-product-s-interface
+    pillar: platform/interfaces
+    scope: http_api
+    skip:
+      - { if: 'api.spec == ""', because: it names no definition }
+    needs: { definition: the definition was not fetched }
+    check: definition.error == ""
+    detail: 'api.spec + ": " + definition.error'
+    fix: "Make the definition the catalog links to readable: the file exists on the default branch, or the URL answers, and it parses."
+
+  - id: api.versioned
+    title: Not served under a major version
+    aim: Served under a major version
+    kind: api
+    severity: medium
+    tier: shaped
+    standard: two-interfaces-over-one-api-no-logic-in-either
+    pillar: platform/interfaces
+    scope: http_api
+    skip: &shape
+      - { if: 'api.spec == ""', because: it names no definition }
+      - { if: 'definition.error == "" && definition.format == "openapi" && size(definition.openapi.operations) == 0', because: its definition has no operations }
+    needs: { definition: the definition was not fetched }
+    unknown: &readable
+      - { if: definition.error != "", because: the definition cannot be read }
+      - { if: definition.format != "openapi", explain: '"its definition is " + definition.format + "; the shape rules read OpenAPI"' }
+    check: definition.openapi.operations.all(o, o.versioned)
+    detail: '"%d of %d operations carry no major version, such as %s".format([size(definition.openapi.operations.filter(o, !o.versioned)), size(definition.openapi.operations), definition.openapi.operations.filter(o, !o.versioned)[0].name])'
+    fix: Serve every route under /v1/, and ship a breaking change as /v2/ beside it for one release.
+
+  - id: api.security
+    title: Does not say how a caller signs in
+    aim: Says how a caller signs in
+    kind: api
+    severity: medium
+    tier: shaped
+    standard: one-shape-for-every-product-s-interface
+    pillar: platform/interfaces
+    scope: http_api
+    skip: *shape
+    needs: { definition: the definition was not fetched }
+    unknown: *readable
+    check: size(definition.openapi.schemes) > 0 && definition.openapi.operations.all(o, !o.open || o.open_on_purpose)
+    detail: 'size(definition.openapi.schemes) == 0 ? "it declares no security scheme" : "%d of %d operations name no security, such as %s".format([size(definition.openapi.operations.filter(o, o.open && !o.open_on_purpose)), size(definition.openapi.operations), definition.openapi.operations.filter(o, o.open && !o.open_on_purpose)[0].name])'
+    fix: "Declare the security scheme the API takes and require it on every operation; mark one meant to be open with security: []."
+
+  - id: api.errors
+    title: Errors have no one documented shape
+    aim: Errors have one documented shape
+    kind: api
+    severity: medium
+    tier: shaped
+    standard: two-interfaces-over-one-api-no-logic-in-either
+    pillar: platform/interfaces
+    scope: http_api
+    skip: *shape
+    needs: { definition: the definition was not fetched }
+    unknown: *readable
+    check: definition.openapi.operations.all(o, size(o.errors) > 0) && size(definition.openapi.error_shapes) <= 1
+    detail: >-
+      [
+        definition.openapi.operations.exists(o, size(o.errors) == 0)
+          ? "%d of %d operations document no error, such as %s".format([size(definition.openapi.operations.filter(o, size(o.errors) == 0)), size(definition.openapi.operations), definition.openapi.operations.filter(o, size(o.errors) == 0)[0].name])
+          : "",
+        size(definition.openapi.error_shapes) > 1
+          ? "errors come in %d shapes: %s".format([size(definition.openapi.error_shapes), definition.openapi.error_shapes.join(", ")])
+          : ""
+      ].filter(s, s != "").join("; ")
+    fix: Document each operation's error responses, every one with the same error schema.
+
+  - id: api.operation-ids
+    title: Operations are not each named
+    aim: Every operation is named
+    kind: api
+    severity: medium
+    tier: shaped
+    standard: generate-agent-tools-from-the-http-api-s-own-openapi-documen
+    pillar: platform/interfaces
+    scope: http_api
+    skip: *shape
+    needs: { definition: the definition was not fetched }
+    unknown: *readable
+    check: definition.openapi.operations.all(o, o.id != "") && size(definition.openapi.duplicate_ids) == 0
+    detail: >-
+      [
+        definition.openapi.operations.exists(o, o.id == "")
+          ? "%d of %d operations have no operationId, such as %s".format([size(definition.openapi.operations.filter(o, o.id == "")), size(definition.openapi.operations), definition.openapi.operations.filter(o, o.id == "")[0].name])
+          : "",
+        size(definition.openapi.duplicate_ids) > 0 ? "used twice: " + definition.openapi.duplicate_ids.join(", ") : ""
+      ].filter(s, s != "").join("; ")
+    fix: Give every operation a unique operationId, the name a generated CLI, SDK, or agent tool calls it by.
+
+  - id: api.described
+    title: Operations are not described
+    aim: Every operation is described
+    kind: api
+    severity: low
+    tier: shaped
+    standard: generate-agent-tools-from-the-http-api-s-own-openapi-documen
+    pillar: platform/interfaces
+    scope: http_api
+    skip: *shape
+    needs: { definition: the definition was not fetched }
+    unknown: *readable
+    check: definition.openapi.operations.all(o, o.described)
+    detail: '"%d of %d operations have no summary or description, such as %s".format([size(definition.openapi.operations.filter(o, !o.described)), size(definition.openapi.operations), definition.openapi.operations.filter(o, !o.described)[0].name])'
+    fix: Give every operation a summary or a description, written for a caller who has only the definition.
+
+  - id: api.breaking
+    title: Breaks a caller since the last release
+    aim: Breaks no caller since the last release
+    kind: api
+    severity: critical
+    tier: defined
+    standard: two-interfaces-over-one-api-no-logic-in-either
+    pillar: platform/interfaces
+    stages: [check]
+    needs: { breaking: there is no release to compare with }
+    check: size(breaking.changes) == 0
+    detail: '"since " + breaking.base + ": " + breaking.changes.join("; ")'
+    fix: Put the change back, or ship it as a new major version beside the old one for one release.

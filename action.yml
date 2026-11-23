@@ -1,0 +1,36 @@
+name: trellis check
+description: Judges a repository checkout with trellis's packs, the same ones the board judges the estate with, and fails the job on a finding at or over a severity.
+author: The Orchard authors
+branding:
+  icon: check-circle
+  color: green
+inputs:
+  dir:
+    description: The app's folder, the repository root or one app's folder. Its orrery.yaml names the APIs.
+    required: false
+    default: .
+  packs:
+    description: The packs to judge, comma separated. Empty is every pack.
+    required: false
+    default: build,interfaces
+  match:
+    description: The release tags to compare definitions with, a glob such as myapp-v* in a repository of several packages.
+    required: false
+    default: ''
+  fail-on:
+    description: The least severe finding that fails the job.
+    required: false
+    default: high
+runs:
+  using: docker
+  image: action.Dockerfile
+  args:
+    - check
+    - -dir
+    - ${{ inputs.dir }}
+    - -packs
+    - ${{ inputs.packs }}
+    - -match
+    - ${{ inputs.match }}
+    - -fail-on
+    - ${{ inputs.fail-on }}

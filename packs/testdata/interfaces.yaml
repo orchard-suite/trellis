@@ -1,0 +1,50 @@
+# The interfaces pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+shape: &shape
+  api: { kind: rest, spec: https://example.test/openapi.json, service: github/example/app }
+  definition:
+    format: openapi
+    error: ""
+    openapi:
+      version: 3.1.0
+      schemes: [bearer]
+      error_shapes: [Error]
+      duplicate_ids: []
+      operations:
+        - { name: GET /v1/things, id: listThings, described: true, versioned: true, open: false, open_on_purpose: false, errors: [default] }
+        - { name: GET /v1/health, id: health, described: true, versioned: true, open: true, open_on_purpose: true, errors: ["503"] }
+rules:
+  api.definition:
+    fail: { api: { kind: rest, spec: "" } }
+    pass: { api: { kind: rest, spec: https://example.test/openapi.json } }
+    nodata: { api: { kind: rest } }
+  api.definition-unread:
+    fail: { api: { kind: rest, spec: https://example.test/openapi.json }, definition: { format: "", error: example.test answered 404 Not Found } }
+    pass: *shape
+    nodata: { api: { kind: rest, spec: https://example.test/openapi.json } }
+  api.versioned:
+    fail: { <<: *shape, definition: { format: openapi, error: "", openapi: { schemes: [bearer], error_shapes: [Error], duplicate_ids: [], operations: [{ name: GET /things, id: a, described: true, versioned: false, open: false, open_on_purpose: false, errors: [default] }] } } }
+    pass: *shape
+    nodata: { api: { kind: grpc, spec: https://example.test/api.proto }, definition: { format: protobuf, error: "" } }
+  api.security:
+    fail: { <<: *shape, definition: { format: openapi, error: "", openapi: { schemes: [], error_shapes: [Error], duplicate_ids: [], operations: [{ name: GET /v1/a, id: a, described: true, versioned: true, open: true, open_on_purpose: false, errors: [default] }] } } }
+    pass: *shape
+    nodata: { api: { kind: rest, spec: https://example.test/openapi.json }, definition: { format: openapi, error: timeout } }
+  api.errors:
+    fail: { <<: *shape, definition: { format: openapi, error: "", openapi: { schemes: [bearer], error_shapes: [Error, an inline schema (0badf00d)], duplicate_ids: [], operations: [{ name: GET /v1/a, id: a, described: true, versioned: true, open: false, open_on_purpose: false, errors: [] }] } } }
+    pass: *shape
+    nodata: { api: { kind: rest, spec: https://example.test/openapi.json } }
+  api.operation-ids:
+    fail: { <<: *shape, definition: { format: openapi, error: "", openapi: { schemes: [bearer], error_shapes: [Error], duplicate_ids: [a], operations: [{ name: GET /v1/a, id: "", described: true, versioned: true, open: false, open_on_purpose: false, errors: [default] }] } } }
+    pass: *shape
+    nodata: { api: { kind: rest, spec: https://example.test/openapi.json }, definition: { format: AsyncAPI, error: "" } }
+  api.described:
+    fail: { <<: *shape, definition: { format: openapi, error: "", openapi: { schemes: [bearer], error_shapes: [Error], duplicate_ids: [], operations: [{ name: GET /v1/a, id: a, described: false, versioned: true, open: false, open_on_purpose: false, errors: [default] }] } } }
+    pass: *shape
+    nodata: { api: { kind: rest, spec: https://example.test/openapi.json } }
+  api.breaking:
+    fail: { breaking: { base: app-v1.0.0, changes: ["DELETE /v1/things/{id} is gone"] } }
+    pass: { breaking: { base: app-v1.0.0, changes: [] } }
+    nodata: {}

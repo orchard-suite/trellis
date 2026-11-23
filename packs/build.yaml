@@ -1,0 +1,60 @@
+pack: build
+title: Build
+about: How a repository is built
+version: 3.0.0
+family: platform
+# One tier: a repository is conformant when no rule fails or lacks data,
+# so the catalog levels on the verdict and never counts missing data.
+tiers: [conformant]
+# Judged on the default branch's tree.
+
+scopes:
+  # A repository someone builds from: not archived, not a fork, not empty.
+  built_repo: '!repo.archived && !repo.fork && !forge.empty'
+
+rules:
+  - id: build.agents-md
+    title: No AGENTS.md at the root
+    aim: Has an AGENTS.md at the root
+    kind: repository
+    severity: medium
+    tier: conformant
+    standard: use-only-agents-md-scoped-by-area
+    pillar: platform/agents
+    scope: built_repo
+    needs: { forge.files: the tree was not read }
+    check: '"AGENTS.md" in forge.files'
+    detail: '"the default branch has no AGENTS.md at its root"'
+    fix: "Add an AGENTS.md at the root: what the repository is, how to build and test it, and how it is delivered."
+
+  - id: build.claude-md
+    title: Has a CLAUDE.md
+    aim: Has no CLAUDE.md
+    kind: repository
+    severity: medium
+    tier: conformant
+    standard: use-only-agents-md-scoped-by-area
+    pillar: platform/agents
+    scope: built_repo
+    needs: { forge.files: the tree was not read }
+    check: '!forge.files.exists(f, f == "CLAUDE.md" || f.endsWith("/CLAUDE.md"))'
+    detail: 'forge.files.filter(f, f == "CLAUDE.md" || f.endsWith("/CLAUDE.md")).join(", ")'
+    fix: Move its rules into the nearest AGENTS.md and delete it; AGENTS.md is the only instruction file.
+
+  - id: build.self-describing
+    title: Runs an app that does not describe itself
+    aim: Every app it runs describes itself
+    kind: repository
+    severity: medium
+    tier: conformant
+    standard: let-software-describe-itself-from-a-file-in-its-repository
+    pillar: platform/catalog
+    scope: built_repo
+    skip:
+      - { if: has(runs.folders) && size(runs.folders) == 0, because: nothing the estate runs is built here }
+    needs:
+      runs.folders: the catalog did not say what runs from here
+      forge.files: the tree was not read
+    check: 'runs.folders.all(a, (a == "" ? "orrery.yaml" : a + "/orrery.yaml") in forge.files)'
+    detail: '"no " + runs.folders.map(a, a == "" ? "orrery.yaml" : a + "/orrery.yaml").filter(p, !(p in forge.files)).join(", ")'
+    fix: Add an orrery.yaml beside the app, so the catalog that reads its repository knows its service, its APIs, and what it calls.

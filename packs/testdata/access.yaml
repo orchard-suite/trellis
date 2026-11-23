@@ -1,0 +1,53 @@
+# The access pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+# The grant and application tiers are off until an estate turns them on,
+# and the admin rule needs the estate's admin roles.
+params:
+  access: { access_tiers: [hygiene, reviewed], admin_roles: [Admin] }
+rules:
+  access.blueprint-unreviewed:
+    fail: { access: { created_at: "2026-10-01T00:00:00Z", reviewed_at: null, new_fields: [cost_cents], open_fields: [] } }
+    pass: { access: { created_at: "2026-10-01T00:00:00Z", reviewed_at: "2026-10-02T00:00:00Z", new_fields: [], open_fields: [] } }
+    nodata: { access: { reviewed_at: null } }
+  access.fields-unreviewed:
+    fail: { access: { created_at: "2026-10-01T00:00:00Z", reviewed_at: "2026-10-02T00:00:00Z", new_fields: [size_gb], open_fields: [size_gb] } }
+    pass: { access: { created_at: "2026-10-01T00:00:00Z", reviewed_at: "2026-10-02T00:00:00Z", new_fields: [], open_fields: [] } }
+    nodata: { access: { reviewed_at: "2026-10-02T00:00:00Z" } }
+  access.money-open:
+    fail: { access: { open_fields: [name, cost_month_to_date_cents] } }
+    pass: { access: { open_fields: [name, tags_costcenter, cost_center, invoice_date, billing_account, cost_updated] } }
+    nodata: { access: { reviewed_at: null } }
+  access.field-nobody:
+    fail: { access: { nobody: [budget] } }
+    pass: { access: { nobody: [] } }
+    nodata: { access: { reviewed_at: null } }
+  access.audience-empty:
+    fail: { audience: { id: cost, members: 0, strangers: [] } }
+    pass: { audience: { id: cost, members: 3, strangers: [] } }
+    nodata: { audience: { id: cost } }
+  access.audience-strangers:
+    fail: { audience: { id: cost, members: 1, strangers: [user@example.com] } }
+    pass: { audience: { id: cost, members: 1, strangers: [] } }
+    nodata: { audience: { id: cost } }
+  access.admin-token:
+    fail: { posture: { admin_tokens: [agent-admin] } }
+    pass: { posture: { admin_tokens: [] } }
+    nodata: {}
+  access.grant-account-gone:
+    fail: { grant: { principal_type: user, account: user@example.com, role: Reader, app: Wiki, holder: disabled } }
+    pass: { grant: { principal_type: group, account: wiki-readers, role: Reader, app: Wiki, holder: active } }
+    nodata: { grant: { principal_type: user, role: Reader, app: Wiki } }
+  access.admin-direct:
+    fail: { grant: { principal_type: user, account: user@example.com, role: Admin, app: Wiki, holder: active, user_type: member } }
+    pass: { grant: { principal_type: user, account: user@example.com, role: Reader, app: Wiki, holder: active, user_type: member } }
+    nodata: { grant: { principal_type: user, app: Wiki } }
+  access.grant-guest:
+    fail: { grant: { principal_type: user, account: guest@example.test, role: Reader, app: Wiki, holder: active, user_type: guest } }
+    pass: { grant: { principal_type: user, account: user@example.com, role: Reader, app: Wiki, holder: active, user_type: member } }
+    nodata: { grant: { principal_type: user, role: Reader, app: Wiki } }
+  access.application-unreviewed:
+    fail: { application: { grants: 4, reviewed_at: "" } }
+    pass: { application: { grants: 4, reviewed_at: "2026-06-01T00:00:00Z" } }
+    nodata: { application: { grants: 4 } }

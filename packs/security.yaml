@@ -1,0 +1,408 @@
+pack: security
+title: Security
+about: Exposure, signing, and policy
+version: 3.3.0
+family: security
+# Baseline is every critical and high rule: what no subject may carry.
+# Hardened adds the rest. A subject reaches a tier when no counted rule of
+# it or below fails or lacks data.
+tiers: [baseline, hardened]
+params:
+  # Where an image may come from.
+  allowed_registries: [ghcr.io, quay.io, registry.k8s.io, gcr.io, docker.io, mcr.microsoft.com, public.ecr.aws, ecr-public.aws.com]
+  # The EPSS score (0 to 1) at which a CVE is likely enough to be exploited to warn about.
+  epss_warn: 0.5
+  # A repository counts as maintained when something the estate runs is
+  # built from it, or it was pushed within this many days.
+  active_days: 180
+  host_silent_days: 7
+  patch_lag_days: 45
+  secret_max_age_days: 365
+  # The kinds a secret's content type may name, before any colon.
+  secret_types: [opaque, connection string, client id, client secret, password, token]
+  # The kinds nobody rotates: a value kept, not a credential.
+  secret_kept: [opaque, client id]
+
+scopes:
+  # A repository someone could still push to: not archived, not a fork.
+  live_repo: '!repo.archived && !repo.fork'
+  # A live repository that is maintained: the estate runs something built
+  # from it, or it was pushed recently. A dead side project is out of the
+  # count, so a pass rate divides only by what matters.
+  maintained_repo: >-
+    !repo.archived && !repo.fork &&
+    ((has(runs.folders) && size(runs.folders) > 0) || (has(repo.last_push) && days_since(repo.last_push, now) <= params.active_days))
+  # An image someone here is expected to sign.
+  signed_image: signing.in_scope
+
+rules:
+  - id: cluster.no-policy-engine
+    title: No policy engine writes PolicyReports
+    aim: A policy engine writes PolicyReports
+    kind: cluster
+    severity: medium
+    tier: hardened
+    standard: baseline-pod-security-enforced-by-default
+    pillar: platform/security
+    needs: { cluster.policy_engine: the cluster was not read }
+    check: cluster.policy_engine
+    detail: '"no PolicyReport API is served; no policy engine runs"'
+    fix: Install Kyverno in Audit mode so every pod is judged against the cluster's policies.
+
+  - id: repo.branch-protection
+    title: Default branch is not protected
+    aim: Default branch is protected
+    kind: repository
+    severity: medium
+    tier: hardened
+    standard: written-is-not-working-observed-local-gated-hands-on-then-gr
+    pillar: platform/golden_paths
+    scope: maintained_repo
+    needs: { repo.branch_protected: the forge did not say }
+    check: repo.branch_protected
+    detail: '"anyone with write access can push straight to the default branch"'
+    fix: "Protect the default branch: require a pull request or passing checks before a merge."
+
+  - id: repo.no-ci
+    title: No CI runs on push
+    aim: CI runs on push
+    kind: repository
+    severity: medium
+    tier: hardened
+    standard: written-is-not-working-observed-local-gated-hands-on-then-gr
+    pillar: platform/golden_paths
+    scope: maintained_repo
+    # A private repository keeps a pipeline only to publish what something
+    # consumes; the delivery pack judges that one.
+    skip:
+      - if: forge.private && size(runs.folders) == 0 && !("release-please-config.json" in forge.files)
+        because: it is private and nothing consumes it, so it gets no pipeline
+    needs: { repo.has_ci: the forge did not say }
+    check: repo.has_ci
+    detail: '"no pipeline runs for this repository"'
+    fix: Add a CI workflow that builds and tests every push to the default branch.
+
+  - id: repo.alerts-critical
+    title: Open critical security alerts
+    aim: No open critical security alerts
+    kind: repository
+    severity: critical
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    scope: live_repo
+    needs: { repo.alerts_critical: the forge does not report alerts here }
+    check: repo.alerts_critical == 0
+    detail: plural(repo.alerts_critical, "critical alert", "critical alerts") + " open"
+    fix: Open the repository's security tab and fix or dismiss each critical alert.
+
+  - id: repo.alerts-high
+    title: Open high security alerts
+    aim: No open high security alerts
+    kind: repository
+    severity: high
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    scope: live_repo
+    needs: { repo.alerts_high: the forge does not report alerts here }
+    check: repo.alerts_high == 0
+    detail: plural(repo.alerts_high, "high alert", "high alerts") + " open"
+    fix: Update the dependency or fix the code each high alert names.
+
+  - id: image.cve-kev
+    title: Runs a known-exploited CVE
+    aim: Runs no known-exploited CVE
+    kind: image
+    severity: critical
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.cve_kev: the image was not scanned }
+    check: scan.cve_kev == 0
+    detail: plural(scan.cve_kev, "CVE", "CVEs") + " in CISA's Known Exploited Vulnerabilities catalog"
+    fix: Rebuild on a base image that fixes the CVE in CISA's KEV catalog, or stop running the image.
+
+  - id: image.cve-critical
+    title: Carries critical CVEs
+    aim: Carries no critical CVEs
+    kind: image
+    severity: high
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.cve_critical: the image was not scanned }
+    check: scan.cve_critical == 0
+    detail: plural(scan.cve_critical, "CVE", "CVEs") + " rated critical, %d fixable".format([int(scan.cve_fixable)])
+    fix: Update the packages the critical CVEs name and rebuild the image.
+
+  - id: image.cve-epss
+    title: Carries a CVE likely to be exploited
+    aim: Carries no CVE likely to be exploited
+    kind: image
+    severity: high
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.epss_max: the image was not scanned }
+    check: scan.epss_max < params.epss_warn
+    detail: '"a CVE with an EPSS of %.2f (%.0f%% chance of exploitation in 30 days)".format([scan.epss_max, scan.epss_max * 100.0])'
+    fix: Patch the CVE with the highest EPSS score first; it is the one attackers are using.
+
+  - id: image.cve-fixable
+    title: Carries CVEs a newer build would fix
+    aim: Carries no CVEs a newer build would fix
+    kind: image
+    severity: low
+    tier: hardened
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.cve_fixable: the image was not scanned }
+    check: scan.cve_fixable == 0
+    detail: plural(scan.cve_fixable, "CVE", "CVEs") + " with a fix available"
+    fix: Rebuild the image on current packages, or take the upstream release that carries the fixes.
+
+  - id: image.unsigned
+    title: Not signed by a trusted identity
+    aim: Signed by a trusted identity
+    kind: image
+    severity: medium
+    tier: hardened
+    standard: build-and-sign-every-house-image-in-its-own-repository-s-wor
+    pillar: platform/security
+    scope: signed_image
+    needs: { signing: signatures were not checked }
+    check: signing.signed
+    detail: '"no cosign signature by a trusted identity"'
+    evidence: '[{"source": "registry", "query": "cosign verify " + subject.key, "got": signing.signed ? "signed by " + signing.identity : "no signature"}]'
+    fix: Sign the image in its release workflow with cosign keyless.
+
+  - id: image.no-sbom
+    title: No SBOM attestation
+    aim: Has an SBOM attestation
+    kind: image
+    severity: low
+    tier: hardened
+    standard: build-and-sign-every-house-image-in-its-own-repository-s-wor
+    pillar: platform/security
+    scope: signed_image
+    needs: { signing: attestations were not checked }
+    check: signing.sbom
+    detail: '"no SBOM attestation signed by a trusted identity"'
+    fix: Attest an SBOM with syft and cosign attest in the release workflow, beside the signature.
+
+  - id: workload.latest-tag
+    title: Runs an image tagged latest or untagged
+    aim: Runs no image tagged latest or untagged
+    kind: workload
+    severity: medium
+    tier: hardened
+    standard: roll-back-by-editing-the-image-tag-in-git
+    pillar: platform/control_plane
+    needs: { workload.images: no images known }
+    unknown: [{ if: size(workload.images) == 0, because: no images known }]
+    check: workload.images.all(i, i.pinned || (i.tag != "" && i.tag != "latest"))
+    detail: workload.images.filter(i, !(i.pinned || (i.tag != "" && i.tag != "latest"))).map(i, i.ref).join(", ")
+    fix: Pin each image to a version tag or a digest, so a rollout is a change you chose.
+
+  - id: workload.unknown-registry
+    title: Runs an image from a registry not on the list
+    aim: Runs images only from registries on the list
+    kind: workload
+    severity: medium
+    tier: hardened
+    standard: build-and-sign-every-house-image-in-its-own-repository-s-wor
+    pillar: platform/security
+    needs: { workload.images: no images known }
+    unknown: [{ if: size(workload.images) == 0, because: no images known }]
+    check: workload.images.all(i, i.registry in params.allowed_registries)
+    detail: workload.images.filter(i, !(i.registry in params.allowed_registries)).map(i, i.ref).join(", ")
+    fix: Pull from a registry you trust, or add this one to the pack's allowed_registries on purpose.
+
+  - id: workload.run-as-root
+    title: May run as root
+    aim: Cannot run as root
+    kind: workload
+    severity: medium
+    tier: hardened
+    standard: baseline-pod-security-enforced-by-default
+    pillar: platform/security
+    needs: { pods: pods were not read }
+    check: pods.run_as_non_root
+    detail: '"no container is required to run as a non-root user"'
+    fix: "Set runAsNonRoot: true in the pod's securityContext and build the image for a non-root user."
+
+  - id: workload.no-limits
+    title: A container has no resource limits
+    aim: Every container has resource limits
+    kind: workload
+    severity: low
+    tier: hardened
+    standard: baseline-pod-security-enforced-by-default
+    pillar: platform/control_plane
+    needs: { pods: pods were not read }
+    check: size(pods.no_limits) == 0
+    detail: pods.no_limits.join(", ")
+    fix: Set cpu and memory limits on every container, so one runaway cannot take the node.
+
+  - id: workload.privileged
+    title: Runs a privileged container
+    aim: Runs no privileged container
+    kind: workload
+    severity: critical
+    tier: baseline
+    standard: baseline-pod-security-enforced-by-default
+    pillar: platform/security
+    needs: { pods: pods were not read }
+    check: "!pods.privileged"
+    detail: '"a container runs privileged, which is root on the node"'
+    fix: "Drop privileged: true; grant the one capability the container needs instead."
+
+  - id: workload.host-namespaces
+    title: Shares the node's network, PID, or IPC namespace
+    aim: Shares none of the node's network, PID, or IPC namespaces
+    kind: workload
+    severity: critical
+    tier: baseline
+    standard: baseline-pod-security-enforced-by-default
+    pillar: platform/security
+    needs: { pods: pods were not read }
+    check: "!pods.host_namespaces"
+    detail: '"the pod shares a host namespace"'
+    fix: Remove hostNetwork, hostPID, and hostIPC; expose a port through a Service instead.
+
+  - id: workload.no-network-policy
+    title: Namespace has no NetworkPolicy
+    aim: Namespace has a NetworkPolicy
+    kind: workload
+    severity: medium
+    tier: hardened
+    standard: hosted-services-run-as-locked-down-tenants
+    pillar: platform/security
+    needs: { pods.network_policy: network policies were not read }
+    check: pods.network_policy
+    detail: '"nothing restricts traffic to or from pods in " + workload.namespace'
+    fix: Add a NetworkPolicy to the namespace that allows only the traffic the workload needs.
+
+  - id: workload.policy-failed
+    title: Fails a cluster policy
+    aim: Passes every cluster policy
+    kind: workload
+    severity: medium
+    tier: hardened
+    standard: baseline-pod-security-enforced-by-default
+    pillar: platform/security
+    needs: { pods.policy_failures: no policy engine reported on it }
+    check: size(pods.policy_failures) == 0
+    detail: pods.policy_failures.map(f, f.policy + "/" + f.rule).join(", ")
+    evidence: 'pods.policy_failures.map(f, {"source": "policy report", "query": f.policy + "/" + f.rule, "got": f.message})'
+    fix: Read the policy report's message and change the manifest until the policy passes.
+
+  - id: host.cve-kev
+    title: Runs software with a known-exploited CVE
+    aim: Runs no software with a known-exploited CVE
+    kind: host
+    severity: critical
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.cve_kev: the host was not scanned }
+    check: scan.cve_kev == 0
+    detail: plural(scan.cve_kev, "CVE", "CVEs") + " in CISA's Known Exploited Vulnerabilities catalog"
+    fix: Update or remove the software the KEV entry names; CISA lists it because it is being exploited now.
+
+  - id: host.cve-critical
+    title: Runs software with critical CVEs
+    aim: Runs no software with critical CVEs
+    kind: host
+    severity: high
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.cve_critical: the host was not scanned }
+    check: scan.cve_critical == 0
+    detail: plural(scan.cve_critical, "CVE", "CVEs") + " rated critical, %d fixable".format([int(scan.cve_fixable)])
+    fix: Install the updates for the packages the critical CVEs name.
+
+  - id: host.cve-epss
+    title: Runs software with a CVE likely to be exploited
+    aim: Runs no software with a CVE likely to be exploited
+    kind: host
+    severity: high
+    tier: baseline
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.epss_max: the host was not scanned }
+    check: scan.epss_max < params.epss_warn
+    detail: '"a CVE with an EPSS of %.2f (%.0f%% chance of exploitation in 30 days)".format([scan.epss_max, scan.epss_max * 100.0])'
+    fix: Patch the CVE with the highest EPSS score first.
+
+  - id: host.cve-fixable
+    title: Has updates waiting that fix CVEs
+    aim: Has no updates waiting that fix CVEs
+    kind: host
+    severity: low
+    tier: hardened
+    standard: vulnerability-exposure-in-the-catalog-count-everything-make-
+    pillar: platform/security
+    needs: { scan.cve_fixable: the host was not scanned }
+    check: scan.cve_fixable == 0
+    detail: plural(scan.cve_fixable, "CVE", "CVEs") + " with a fix available"
+    fix: Install the waiting updates and restart.
+
+  - id: host.silent
+    title: Has not reported in
+    aim: Has reported in
+    kind: host
+    severity: medium
+    tier: hardened
+    standard: devices-report-to-the-house-nothing-commands-them
+    pillar: platform/control_plane
+    needs: { host.last_seen: no last report time }
+    check: days_since(host.last_seen, now) <= params.host_silent_days
+    detail: '"last report %d days ago".format([days_since(host.last_seen, now)])'
+    fix: Check the host is on and its inventory agent runs; a silent host is an unpatched one.
+
+  - id: host.patch-lag
+    title: OS updates are behind
+    aim: OS updates are current
+    kind: host
+    severity: medium
+    tier: hardened
+    standard: devices-report-to-the-house-nothing-commands-them
+    pillar: platform/security
+    needs: { host.last_patched: the agent does not report the last update }
+    check: days_since(host.last_patched, now) <= params.patch_lag_days
+    detail: '"%s %s last updated %d days ago".format([host.os, host.os_version, days_since(host.last_patched, now)])'
+    fix: Run the OS updater and restart; then check the agent reports the new version.
+
+  - id: secret.stale
+    title: Secret has not rotated
+    aim: Secret has rotated
+    kind: secret
+    severity: medium
+    tier: hardened
+    standard: zero-plaintext-secrets-in-git-sealed-secrets-for-the-cluster
+    pillar: platform/security
+    skip:
+      - { if: "!secret.enabled", because: disabled }
+      - { if: secret.type in params.secret_kept, explain: '"a " + secret.type + " value is kept, not rotated"' }
+    needs: { secret.updated: the vault did not say when it last changed }
+    check: days_since(secret.updated, now) <= params.secret_max_age_days
+    detail: '"last changed %d days ago".format([days_since(secret.updated, now)])'
+    fix: Rotate the secret at its source and set the new value in the vault.
+
+  - id: secret.untyped
+    title: Secret has no content type from the list
+    aim: Secret has a content type from the list
+    kind: secret
+    severity: low
+    tier: hardened
+    standard: secrets-carry-a-typed-content-label-and-a-structured-name
+    pillar: platform/security
+    from: 2026-12-07T00:00:00Z
+    skip: [{ if: "!secret.enabled", because: disabled }]
+    needs: { secret.type: the vault did not give its content type }
+    check: secret.type in params.secret_types
+    detail: 'secret.content_type == "" ? "no content type" : "content type \"" + secret.content_type + "\" names no kind from the list"'
+    fix: "Set its content type to one of opaque, connection string, client ID, client secret, password, or token, with a short note after a colon, so tooling can tell how to handle it without reading it."

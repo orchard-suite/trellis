@@ -1,0 +1,25 @@
+# The board, for the sign-in proxy only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: trellis
+spec:
+  selector:
+    app: trellis
+  ports:
+    - name: http
+      port: 80
+      targetPort: session
+---
+# The probes, with no identity.
+apiVersion: v1
+kind: Service
+metadata:
+  name: trellis-health
+spec:
+  selector:
+    app: trellis
+  ports:
+    - name: http
+      port: 8081
+      targetPort: health

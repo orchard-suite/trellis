@@ -1,0 +1,9 @@
+# The estate's tuning of the packs switched on, read by the board and by
+# `trellis check -packs-dir` alike, so a pipeline judges as the board does.
+params:
+  security:
+    allowed_registries: [ghcr.io, mcr.microsoft.com]
+scopes:
+  example:
+    # Judge only the accounts the estate tags as production.
+    production: azure.?tags.?env.orValue("") == "prod"

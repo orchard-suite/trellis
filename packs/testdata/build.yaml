@@ -1,0 +1,17 @@
+# The build pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+rules:
+  build.agents-md:
+    fail: { repo: { archived: false, fork: false }, forge: { empty: false, files: [README.md] } }
+    pass: { repo: { archived: false, fork: false }, forge: { empty: false, files: [AGENTS.md] } }
+    nodata: { repo: { archived: false, fork: false } }
+  build.claude-md:
+    fail: { repo: { archived: false, fork: false }, forge: { empty: false, files: [AGENTS.md, web/CLAUDE.md] } }
+    pass: { repo: { archived: false, fork: false }, forge: { empty: false, files: [AGENTS.md] } }
+    nodata: { repo: { archived: false, fork: false } }
+  build.self-describing:
+    fail: { repo: { archived: false, fork: false }, runs: { folders: ["", workloads/api] }, forge: { empty: false, files: [orrery.yaml] } }
+    pass: { repo: { archived: false, fork: false }, runs: { folders: [workloads/api] }, forge: { empty: false, files: [workloads/api/orrery.yaml] } }
+    nodata: { repo: { archived: false, fork: false }, forge: { empty: false, files: [orrery.yaml] } }

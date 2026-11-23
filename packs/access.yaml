@@ -1,0 +1,198 @@
+pack: access
+title: Access
+about: Who sees what in the catalog
+version: 1.1.0
+family: security
+# Two things. The hub tier judges an Orrery hub's own access rules, read
+# from its posture by the orrery source with posture: true: a new
+# blueprint is reviewed soon after it lands, money is never left open, and
+# every audience lets someone in. The hygiene and reviewed tiers judge who
+# holds access to the estate's applications: each grant a system's lists
+# hold, and each application those grants open. An estate turns them on
+# in access_tiers, and names its admin roles in admin_roles.
+tiers: [hub, hygiene, reviewed]
+
+params:
+  # Days a new blueprint, or a field that came after a review, may wait for a look.
+  review_days: 7
+  # A field whose name matches holds an amount of money, and belongs in a
+  # class: an amount ends _cents, or is a price, budget, salary, or spend, or
+  # a cost per or over a period. A date, an account, or a cost center is not.
+  money_fields: '(_cents$)|(^|_)(price|budget|salary|spend)$|^cost_(per|month|last|monthly|total)'
+  # The tiers over grants and applications the estate judges: hygiene,
+  # reviewed, or both. The hub tier is always judged.
+  access_tiers: []
+  # The role values that count as admin, in every system's own words, such
+  # as Admin or Owner. Empty, no role counts and the admin rule is n/a.
+  admin_roles: []
+  # Days an application that grants access may go between access reviews.
+  access_review_days: 365
+
+scopes:
+  # Every grant, once the estate judges the hygiene tier.
+  grant: '"hygiene" in params.access_tiers'
+  # A grant held by a user, not a group.
+  user_grant: '"hygiene" in params.access_tiers && grant.principal_type == "user"'
+  # An application someone holds a grant to, or one marked for access
+  # review, once the estate judges the reviewed tier.
+  granting_application: '"reviewed" in params.access_tiers && (application.grants > 0 || (has(application.review) && application.review))'
+
+rules:
+  - id: access.blueprint-unreviewed
+    title: Blueprint never reviewed for access
+    aim: Blueprint reviewed for access
+    kind: access_blueprint
+    severity: medium
+    standard: every-read-route-passes-through-the-caller-s-view
+    pillar: platform/security
+    tier: hub
+    needs: { access.created_at: the hub did not say when the blueprint came }
+    check: access.reviewed_at != null || days_since(access.created_at, now) <= params.review_days
+    detail: '"came %d days ago and nobody has reviewed who sees it".format([days_since(access.created_at, now)])'
+    fix: Open Review on the hub's Security page, decide who sees the blueprint and its fields, and mark it reviewed.
+
+  - id: access.fields-unreviewed
+    title: Fields came after the last review
+    aim: No field came after the last review
+    kind: access_blueprint
+    severity: low
+    standard: every-read-route-passes-through-the-caller-s-view
+    pillar: platform/security
+    tier: hub
+    skip: [{ if: access.reviewed_at == null, because: never reviewed; the blueprint rule covers it }]
+    needs: { access.new_fields: the hub did not list the blueprint's fields }
+    check: size(access.new_fields) == 0 || days_since(access.reviewed_at, now) <= params.review_days
+    detail: '"%d fields came after the review: %s".format([size(access.new_fields), access.new_fields.join(", ")])'
+    fix: Review the new fields on the hub's Security page, put any sensitive one in a class, and mark the blueprint reviewed.
+
+  - id: access.money-open
+    title: Money left open
+    aim: Money is not left open
+    kind: access_blueprint
+    severity: high
+    standard: every-read-route-passes-through-the-caller-s-view
+    pillar: platform/security
+    tier: hub
+    needs: { access.open_fields: the hub did not list the blueprint's fields }
+    check: access.open_fields.all(f, !f.matches(params.money_fields))
+    detail: '"open to everyone who sees the blueprint: " + access.open_fields.filter(f, f.matches(params.money_fields)).join(", ")'
+    fix: Add the field to the hub's Cost class, or rename it so the class's pattern covers it; leave it out of the class with a reason if it is not money.
+
+  - id: access.field-nobody
+    title: A field nobody but an admin sees
+    aim: Every field is seen by someone besides an admin
+    kind: access_blueprint
+    severity: low
+    standard: every-read-route-passes-through-the-caller-s-view
+    pillar: platform/security
+    tier: hub
+    needs: { access.nobody: the hub's findings were not read }
+    check: size(access.nobody) == 0
+    detail: '"nobody passes both the blueprint''s rule and the field''s: " + access.nobody.join(", ")'
+    fix: Give the field the blueprint's audience, or put it in a class whose audience also sees the blueprint.
+
+  - id: access.audience-empty
+    title: Audience lets nobody in
+    aim: Audience lets someone in
+    kind: access_audience
+    severity: medium
+    standard: every-read-route-passes-through-the-caller-s-view
+    pillar: platform/security
+    tier: hub
+    needs: { audience.members: the hub did not count the audience }
+    check: audience.members > 0
+    detail: '"no person or token the hub knows is in it, so what it guards is an admin''s alone"'
+    fix: Name the people who belong in the audience on the hub's Security page, or remove it.
+
+  - id: access.audience-strangers
+    title: Audience names people the hub does not know
+    aim: Audience names only people the hub knows
+    kind: access_audience
+    severity: low
+    standard: every-read-route-passes-through-the-caller-s-view
+    pillar: platform/security
+    tier: hub
+    needs: { audience.strangers: the hub did not list the audience's people }
+    check: size(audience.strangers) == 0
+    detail: '"nobody answers to " + audience.strangers.join(", ")'
+    fix: Take people who have left out of the audience, or correct the address.
+
+  - id: access.admin-token
+    title: An access token holds the admin role
+    aim: No access token holds the admin role
+    kind: access_hub
+    severity: medium
+    standard: bearer-tokens-bound-to-revocable-policies
+    pillar: platform/security
+    tier: hub
+    needs: { posture.admin_tokens: the hub's principals were not read }
+    check: size(posture.admin_tokens) == 0
+    detail: 'posture.admin_tokens.join(", ") + " may do everything an admin may, from anywhere it is kept"'
+    fix: Bind the token to a role with only what it needs, such as one holding posture.read for a reader.
+
+  - id: access.grant-account-gone
+    title: Access held by an account that is gone or disabled
+    aim: Access held only by accounts that exist and are enabled
+    kind: access_grant
+    severity: medium
+    tier: hygiene
+    standard: human-access-only-through-project-role-groups-assigned-in-on
+    pillar: platform/security
+    scope: grant
+    needs: { grant.holder: the user and group lists were not read }
+    check: grant.holder == "active"
+    detail: '"the %s %s it is given to is %s".format([grant.principal_type, grant.account, grant.holder == "gone" ? "gone from the directory" : "disabled"])'
+    fix: Remove the assignment in the system that grants it, such as the app's Users and groups page in Entra; enable the account only if it is meant to hold access.
+
+  - id: access.admin-direct
+    title: An admin role held by a person directly
+    aim: No person holds an admin role directly
+    kind: access_grant
+    severity: high
+    tier: hygiene
+    standard: human-access-only-through-project-role-groups-assigned-in-on
+    pillar: platform/security
+    scope: user_grant
+    skip: [{ if: size(params.admin_roles) == 0, because: the estate names no admin roles }]
+    needs:
+      grant.principal_type: the catalog did not say who holds the grant
+      grant.role: the catalog did not say which role the grant gives
+    check: '!(grant.role in params.admin_roles)'
+    detail: '"a user holds the admin role %s on %s directly, not through a group".format([grant.role, grant.app])'
+    fix: Assign the role to the group that holds it for the project, put the person in that group, and remove their own assignment.
+
+  - id: access.grant-guest
+    title: A guest holds access
+    aim: No guest holds access
+    kind: access_grant
+    severity: low
+    tier: hygiene
+    standard: one-scorecard-per-cleanup-goal-for-identity-hygiene
+    pillar: platform/security
+    scope: user_grant
+    skip: [{ if: grant.holder == "gone", because: the account is gone; the gone account rule covers it }]
+    needs:
+      grant.principal_type: the catalog did not say who holds the grant
+      grant.user_type: the user list was not read, or did not say whether the user is a guest
+    check: grant.user_type != "guest"
+    detail: '"the guest %s from another tenant holds %s on %s".format([grant.account, grant.role, grant.app])'
+    fix: Confirm the guest still needs the access and waive the finding with an owner and an end, or remove the assignment.
+
+  - id: access.application-unreviewed
+    title: Access to an application not reviewed in time
+    aim: Access to the application reviewed in time
+    kind: application
+    severity: medium
+    tier: reviewed
+    standard: one-scorecard-per-cleanup-goal-for-identity-hygiene
+    pillar: platform/security
+    scope: granting_application
+    needs:
+      application.grants: the grant list was not read
+      application.reviewed_at: the access review list was not read
+    check: application.reviewed_at != "" && days_since(application.reviewed_at, now) <= params.access_review_days
+    detail: >-
+      application.reviewed_at == ""
+        ? (application.grants > 0 ? "%s and no access review on record".format([plural(application.grants, "grant", "grants")]) : "no access review on record")
+        : (application.grants > 0 ? "%s, last reviewed %d days ago".format([plural(application.grants, "grant", "grants"), days_since(application.reviewed_at, now)]) : "last reviewed %d days ago".format([days_since(application.reviewed_at, now)]))
+    fix: Review who holds access to the application, keep or remove each grant, and sign off, so the review is recorded on the application.

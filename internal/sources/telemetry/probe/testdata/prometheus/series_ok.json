@@ -1,0 +1,8 @@
+{"status":"success","data":[
+ {"__name__":"myapp_build_info","job":"myapp","service_name":"myapp","version":"1.2.3"},
+ {"__name__":"http_server_request_duration_seconds_count","job":"myapp","service_name":"myapp","http_route":"/healthz","http_request_method":"GET","http_response_status_code":"200"},
+ {"__name__":"http_server_request_duration_seconds_count","job":"myapp","service_name":"myapp","http_route":"/api/items/{id}","http_request_method":"GET","http_response_status_code":"200"},
+ {"__name__":"http_server_request_duration_seconds_bucket","job":"myapp","service_name":"myapp","http_route":"/healthz","http_request_method":"GET","http_response_status_code":"200","le":"0.005"},
+ {"__name__":"http_server_request_duration_seconds_bucket","job":"myapp","service_name":"myapp","http_route":"/healthz","http_request_method":"GET","http_response_status_code":"200","le":"0.01"},
+ {"__name__":"http_server_request_duration_seconds_bucket","job":"myapp","service_name":"myapp","http_route":"/healthz","http_request_method":"GET","http_response_status_code":"200","le":"+Inf"}
+]}

@@ -1,0 +1,266 @@
+# How trellis reads a catalog on the blueprint standard. trellis names no
+# blueprint or field itself: an estate whose catalog follows the standard
+# includes it with `include: [standard]` on its orrery source, and one on its own
+# model writes mappings of its own in the same shape. See README.md,
+# "Reading a catalog".
+#
+# Each mapping makes the entities of one blueprint into subjects of a kind
+# the packs judge, with a fact computed by CEL expressions over `entity`
+# (key, title, blueprint, fields, relations), `item` (with `each`), and
+# `joins` (other lists, keyed). An expression that fails leaves its field
+# unknown, so a rule that needs it says no data.
+mappings:
+  # Repositories, for the security and build packs: what the forge says.
+  - kind: repository
+    blueprint: sw_repository
+    fact: repo
+    fields:
+      url: entity.fields.?url.orValue(null)
+      owner: entity.fields.?organization.orValue(null)
+      name: entity.fields.?name.orValue(null)
+      branch: entity.fields.?default_branch.orValue(null)
+      archived: entity.fields.?archived.orValue(false) == true
+      fork: entity.fields.?fork.orValue(false) == true
+      last_push: entity.fields.?last_push.orValue(null)
+      branch_protected: entity.fields.?branch_protected.orValue(null)
+      has_ci: entity.fields.?has_ci.orValue(null)
+      # A sum is unknown only when both counts are.
+      alerts_critical: >-
+        sum([entity.fields.?dependabot_critical.orValue(null), entity.fields.?code_scanning_critical.orValue(null)])
+      alerts_high: >-
+        sum([entity.fields.?dependabot_high.orValue(null), entity.fields.?code_scanning_high.orValue(null)])
+  # What runs from each repository: the folder of every workload whose repo
+  # link points into it, and those workloads' owners, so a finding on the
+  # repository goes to who runs what it builds. Unknown when the workload
+  # list cannot be read.
+  - kind: repository
+    blueprint: sw_repository
+    fact: runs
+    optional: true
+    join:
+      workloads: { blueprint: sw_workload, key: 'repo_url(entity.fields.?repo.orValue("")).base', many: true }
+    fields:
+      folders: >-
+        has(entity.fields.url) && repo_url(entity.fields.url).base in joins.workloads
+          ? joins.workloads[repo_url(entity.fields.url).base].map(w, repo_url(w.fields.repo).folder).distinct()
+          : []
+      owners: >-
+        has(entity.fields.url) && repo_url(entity.fields.url).base in joins.workloads
+          ? joins.workloads[repo_url(entity.fields.url).base].map(w, w.fields.?owner.orValue("")).filter(o, o != "").distinct()
+          : []
+
+  # Cluster workloads, keyed cluster/namespace/name, with the images they run.
+  - kind: workload
+    blueprint: k8s_workload
+    where: entity.key.split("/").size() == 3
+    title: entity.key.split("/")[1] + "/" + entity.key.split("/")[2]
+    fact: workload
+    fields:
+      cluster: entity.key.split("/")[0]
+      namespace: entity.key.split("/")[1]
+      name: entity.key.split("/")[2]
+      kind: entity.fields.?kind.orValue(null)
+      images: entity.fields.?images.orValue([]).filter(i, i != "").map(i, image(i))
+
+  # Every image a workload runs is judged, with its scan when the catalog
+  # holds one. A tag nothing runs is not the estate's exposure. Each image
+  # links to the workloads that run it, and a finding on a scanned image
+  # links to that image's entity.
+  - kind: image
+    blueprint: k8s_workload
+    each: entity.fields.?images.orValue([]).filter(i, i != "")
+    key: item
+    title: item
+    fact: image
+    link: false
+    links: '[{"kind": "workload", "key": entity.key}]'
+    fields:
+      ref: image(item).ref
+      registry: image(item).registry
+      tag: image(item).tag
+      pinned: image(item).pinned
+  - kind: image
+    blueprint: k8s_workload
+    each: entity.fields.?images.orValue([]).filter(i, i != "" && i in joins.scans && joins.scans[i].fields.?software_count.orValue(null) != null)
+    key: item
+    title: item
+    fact: scan
+    optional: true
+    ref: { blueprint: sw_container_image, key: item }
+    join:
+      scans: { blueprint: sw_container_image }
+    fields:
+      software: double(joins.scans[item].fields.?software_count.orValue(0.0))
+      cve_total: double(joins.scans[item].fields.?cve_total.orValue(0.0))
+      cve_critical: double(joins.scans[item].fields.?cve_critical.orValue(0.0))
+      cve_high: double(joins.scans[item].fields.?cve_high.orValue(0.0))
+      cve_kev: double(joins.scans[item].fields.?cve_kev.orValue(0.0))
+      cve_fixable: double(joins.scans[item].fields.?cve_fixable.orValue(0.0))
+      epss_max: double(joins.scans[item].fields.?epss_max.orValue(0.0))
+
+  # Hosts, one mapping per kind of machine the standard keeps.
+  - &host
+    kind: host
+    blueprint: it_workstation
+    key: entity.blueprint + ":" + entity.key
+    fact: host
+    optional: true
+    fields: &hostfields
+      list: entity.blueprint
+      os: entity.fields.?os.orValue(null)
+      os_version: entity.fields.?os_version.orValue(null)
+      last_seen: entity.fields.?last_seen.orValue(null)
+      last_patched: entity.fields.?os_updated_at.orValue(entity.fields.?last_update.orValue(entity.fields.?patched_at.orValue(null)))
+  - &hostscan
+    kind: host
+    blueprint: it_workstation
+    where: entity.fields.?software_count.orValue(null) != null
+    key: entity.blueprint + ":" + entity.key
+    fact: scan
+    optional: true
+    fields: &scanfields
+      software: double(entity.fields.?software_count.orValue(0.0))
+      cve_total: double(entity.fields.?cve_total.orValue(0.0))
+      cve_critical: double(entity.fields.?cve_critical.orValue(0.0))
+      cve_high: double(entity.fields.?cve_high.orValue(0.0))
+      cve_kev: double(entity.fields.?cve_kev.orValue(0.0))
+      cve_fixable: double(entity.fields.?cve_fixable.orValue(0.0))
+      epss_max: double(entity.fields.?epss_max.orValue(0.0))
+  - { <<: *host, blueprint: it_hardware }
+  - { <<: *hostscan, blueprint: it_hardware }
+  - { <<: *host, blueprint: it_virtual_machine }
+  - { <<: *hostscan, blueprint: it_virtual_machine }
+
+  # Apps and programs, for the catalog pack: what the catalog says of
+  # each. A field nobody set is empty, so a rule fails it; a list that
+  # cannot be read leaves the fact unknown.
+  - kind: app
+    blueprint: sw_workload
+    fact: app
+    optional: true
+    fields:
+      description: entity.fields.?description.orValue("")
+      repo: entity.fields.?repo.orValue("")
+      owner: entity.fields.?owner.orValue("")
+      tier: entity.fields.?tier.orValue("")
+      lifecycle: entity.fields.?lifecycle.orValue("")
+      runbook: entity.fields.?runbook.orValue("")
+      docs: entity.fields.?docs.orValue("")
+      notes: entity.fields.?notes.orValue("")
+      # What discovery found running it: cluster workloads and VMs.
+      runs: >-
+        sum([entity.fields.?cluster_workloads.orValue(null), entity.fields.?workloads.orValue(null), entity.fields.?vms.orValue(null)])
+      program: >-
+        size(entity.relations.?program.orValue([])) > 0 ? entity.relations.program[0].key : ""
+  - kind: program
+    blueprint: program
+    fact: program
+    optional: true
+    fields:
+      description: entity.fields.?description.orValue("")
+      lifecycle: entity.fields.?lifecycle.orValue("")
+      team: >-
+        size(entity.relations.?team.orValue([])) > 0
+          ? (entity.relations.team[0].title != "" ? entity.relations.team[0].title : entity.relations.team[0].key)
+          : ""
+      services: double(entity.fields.?services.orValue(0.0))
+      workloads: double(entity.fields.?workloads.orValue(0.0))
+
+  # Access grants, for the access pack's hygiene tier: one Entra app
+  # assignment each, with the role it gives and who holds it. holder is
+  # active, disabled, or gone: a user or group the directory lists no
+  # longer is gone. The Entra pusher pushes only enabled users and drops an
+  # assignment whose user it did not push, so an Entra grant is seldom
+  # disabled or gone; the rule holds every system's lists to it alike.
+  - kind: access_grant
+    blueprint: entra_app_role_assignment
+    fact: grant
+    optional: true
+    fields:
+      role: entity.fields.?role.orValue(null)
+      principal_type: entity.fields.?principal_type.orValue(null)
+      app: >-
+        size(entity.relations.?app.orValue([])) == 0 ? "" :
+        (entity.relations.app[0].title != "" ? entity.relations.app[0].title : entity.relations.app[0].key)
+  - kind: access_grant
+    blueprint: entra_app_role_assignment
+    fact: grant
+    optional: true
+    join:
+      users: { blueprint: entra_user }
+      groups: { blueprint: entra_group }
+    fields:
+      account: >-
+        size(entity.relations.?user.orValue([]) + entity.relations.?group.orValue([])) == 0 ? "" :
+        (entity.relations.?user.orValue([]) + entity.relations.?group.orValue([]))
+          .map(h, h.title != "" ? h.title : h.key)[0]
+      holder: >-
+        !has(entity.fields.principal_type) ? null :
+        entity.fields.principal_type == "group"
+          ? (size(entity.relations.?group.orValue([])) > 0 && entity.relations.group[0].key in joins.groups ? "active" : "gone")
+          : (size(entity.relations.?user.orValue([])) == 0 || !(entity.relations.user[0].key in joins.users) ? "gone"
+            : (joins.users[entity.relations.user[0].key].fields.?enabled.orValue(true) == false ? "disabled" : "active"))
+      user_type: >-
+        entity.fields.?principal_type.orValue("") == "user"
+          && size(entity.relations.?user.orValue([])) > 0 && entity.relations.user[0].key in joins.users
+          ? joins.users[entity.relations.user[0].key].fields.?user_type.orValue(null)
+          : null
+
+  # Applications, for the access pack's reviewed tier: how many grants open
+  # each, through the Entra apps people sign in to it with (sign_in), and
+  # when its latest access review (it_access_review, through its relation
+  # application) was signed off, empty when none was.
+  - kind: application
+    blueprint: it_application
+    fact: application
+    optional: true
+    join:
+      grants: { blueprint: entra_app_role_assignment, key: 'size(entity.relations.?app.orValue([])) > 0 ? entity.relations.app[0].key : ""', many: true }
+    fields:
+      review: entity.fields.?access_review.orValue(false) == true
+      grants: >-
+        sum(entity.relations.?sign_in.orValue([]).filter(a, a.key in joins.grants).map(a, size(joins.grants[a.key])) + [0])
+  - kind: application
+    blueprint: it_application
+    fact: application
+    optional: true
+    join:
+      reviews: { blueprint: it_access_review, key: 'size(entity.relations.?application.orValue([])) > 0 ? entity.relations.application[0].key : ""', many: true }
+    fields:
+      reviewed_at: >-
+        entity.key in joins.reviews && joins.reviews[entity.key].exists(r, has(r.fields.reviewed_at))
+          ? string(joins.reviews[entity.key].filter(r, has(r.fields.reviewed_at)).map(r, timestamp(r.fields.reviewed_at)).sort().reverse()[0])
+          : ""
+
+  # The APIs a service built here offers, for the interfaces pack.
+  - kind: api
+    blueprint: sw_api
+    optional: true
+    join:
+      services: { blueprint: sw_service }
+    where: >-
+      entity.fields.?external.orValue(false) != true && size(entity.relations.?service.orValue([])) > 0
+      && entity.relations.service[0].key in joins.services
+      && joins.services[entity.relations.service[0].key].fields.?origin.orValue("") == "built"
+    fact: api
+    fields:
+      kind: entity.fields.?kind.orValue(null)
+      spec: entity.fields.?spec.orValue("")
+      service: entity.relations.service[0].key
+
+  # Waivers kept in the catalog. The owner is the linked person, or the
+  # owner field.
+  - kind: waiver
+    blueprint: plat_waiver
+    fields:
+      rule: entity.fields.?rule.orValue("")
+      subject: entity.fields.?subject.orValue("")
+      reason: entity.fields.?reason.orValue("")
+      category: entity.fields.?category.orValue("")
+      owner: >-
+        entity.fields.?owner.orValue("") != "" ? entity.fields.owner :
+        (size(entity.relations.?person.orValue([])) > 0 ? (entity.relations.person[0].title != "" ? entity.relations.person[0].title : entity.relations.person[0].key) : "")
+      control: entity.fields.?control.orValue("")
+      match: entity.fields.?match.orValue("")
+      expires_at: entity.fields.?expires_at.orValue("")
+      review_at: entity.fields.?review_at.orValue("")

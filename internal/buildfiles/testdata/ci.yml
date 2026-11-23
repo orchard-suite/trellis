@@ -1,0 +1,23 @@
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ${{ vars.RUNS_ON || 'house' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check
+  desktop:
+    strategy:
+      matrix:
+        os: [macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: npm run build:desktop
+  ios:
+    runs-on: [self-hosted, macOS]
+    steps:
+      - run: |
+          xcodebuild archive -scheme App
+      - uses: apple-actions/upload-testflight-build@v1
+  release:
+    uses: example/workflows/.github/workflows/release.yml@main

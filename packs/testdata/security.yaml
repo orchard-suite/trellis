@@ -1,0 +1,118 @@
+# The security pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+scan: &scan { software: 120, cve_total: 0, cve_critical: 0, cve_high: 0, cve_kev: 0, cve_fixable: 0, epss_max: 0.01 }
+pods: &pods { run_as_non_root: true, privileged: false, host_namespaces: false, no_limits: [], network_policy: true, policy_failures: [] }
+# A live, maintained repository: pushed a month before now.
+live: &live { archived: false, fork: false, last_push: "2026-10-04T00:00:00Z" }
+rules:
+  cluster.no-policy-engine:
+    fail: { cluster: { name: home, policy_engine: false } }
+    pass: { cluster: { name: home, policy_engine: true } }
+    nodata: {}
+  repo.branch-protection:
+    fail: { repo: { <<: *live, branch_protected: false } }
+    # Old, but the estate runs something built from it.
+    pass: { repo: { <<: *live, last_push: "2020-01-01T00:00:00Z", branch_protected: true }, runs: { folders: [""] } }
+    nodata: { repo: { <<: *live, branch_protected: null } }
+  repo.no-ci:
+    fail: { repo: { <<: *live, has_ci: false } }
+    pass: { repo: { <<: *live, has_ci: true } }
+    nodata: { repo: { <<: *live } }
+  repo.alerts-critical:
+    fail: { repo: { <<: *live, alerts_critical: 2 } }
+    pass: { repo: { <<: *live, alerts_critical: 0 } }
+    nodata: { repo: { <<: *live, alerts_critical: null } }
+  repo.alerts-high:
+    fail: { repo: { <<: *live, alerts_high: 3 } }
+    pass: { repo: { <<: *live, alerts_high: 0 } }
+    nodata: { repo: { <<: *live } }
+  image.cve-kev:
+    fail: { scan: { <<: *scan, cve_kev: 1 } }
+    pass: { scan: *scan }
+    nodata: { image: { ref: nginx:1.27 } }
+  image.cve-critical:
+    fail: { scan: { <<: *scan, cve_critical: 3, cve_fixable: 2 } }
+    pass: { scan: *scan }
+    nodata: {}
+  image.cve-epss:
+    fail: { scan: { <<: *scan, epss_max: 0.8 } }
+    pass: { scan: *scan }
+    nodata: {}
+  image.cve-fixable:
+    fail: { scan: { <<: *scan, cve_fixable: 4 } }
+    pass: { scan: *scan }
+    nodata: {}
+  image.unsigned:
+    fail: { image: { ref: ghcr.io/example/app:1 }, signing: { in_scope: true, signed: false, sbom: false } }
+    pass: { image: { ref: ghcr.io/example/app:1 }, signing: { in_scope: true, signed: true, identity: https://github.com/example/app, sbom: true } }
+    nodata: { image: { ref: ghcr.io/example/app:1 } }
+  image.no-sbom:
+    fail: { signing: { in_scope: true, signed: true, sbom: false } }
+    pass: { signing: { in_scope: true, signed: true, sbom: true } }
+    nodata: {}
+  workload.latest-tag:
+    fail: { workload: { namespace: apps, images: [{ ref: "ghcr.io/example/app:latest", registry: ghcr.io, tag: latest, pinned: false }] } }
+    pass: { workload: { namespace: apps, images: [{ ref: ghcr.io/example/app:1.2.3, registry: ghcr.io, tag: 1.2.3, pinned: false }] } }
+    nodata: { workload: { namespace: apps, images: [] } }
+  workload.unknown-registry:
+    fail: { workload: { namespace: apps, images: [{ ref: registry.example.org/app:1, registry: registry.example.org, tag: "1", pinned: false }] } }
+    pass: { workload: { namespace: apps, images: [{ ref: "nginx:1.27", registry: docker.io, tag: "1.27", pinned: false }] } }
+    nodata: { workload: { namespace: apps } }
+  workload.run-as-root:
+    fail: { pods: { <<: *pods, run_as_non_root: false } }
+    pass: { pods: *pods }
+    nodata: {}
+  workload.no-limits:
+    fail: { pods: { <<: *pods, no_limits: [app] } }
+    pass: { pods: *pods }
+    nodata: {}
+  workload.privileged:
+    fail: { pods: { <<: *pods, privileged: true } }
+    pass: { pods: *pods }
+    nodata: {}
+  workload.host-namespaces:
+    fail: { pods: { <<: *pods, host_namespaces: true } }
+    pass: { pods: *pods }
+    nodata: {}
+  workload.no-network-policy:
+    fail: { workload: { namespace: apps }, pods: { <<: *pods, network_policy: false } }
+    pass: { workload: { namespace: apps }, pods: *pods }
+    nodata: {}
+  workload.policy-failed:
+    fail: { pods: { <<: *pods, policy_failures: [{ policy: require-limits, rule: limits, message: set limits }] } }
+    pass: { pods: *pods }
+    nodata: { pods: { <<: *pods, policy_failures: null } }
+  host.cve-kev:
+    fail: { scan: { <<: *scan, cve_kev: 2 } }
+    pass: { scan: *scan }
+    nodata: { host: { os: Ubuntu } }
+  host.cve-critical:
+    fail: { scan: { <<: *scan, cve_critical: 1 } }
+    pass: { scan: *scan }
+    nodata: {}
+  host.cve-epss:
+    fail: { scan: { <<: *scan, epss_max: 0.6 } }
+    pass: { scan: *scan }
+    nodata: {}
+  host.cve-fixable:
+    fail: { scan: { <<: *scan, cve_fixable: 7 } }
+    pass: { scan: *scan }
+    nodata: {}
+  host.silent:
+    fail: { host: { last_seen: "2026-10-01T00:00:00Z" } }
+    pass: { host: { last_seen: "2026-11-03T00:00:00Z" } }
+    nodata: { host: { last_seen: null } }
+  host.patch-lag:
+    fail: { host: { os: Ubuntu, os_version: "24.04", last_patched: "2026-06-01T00:00:00Z" } }
+    pass: { host: { os: Ubuntu, os_version: "24.04", last_patched: "2026-11-01T00:00:00Z" } }
+    nodata: { host: { os: Ubuntu, os_version: "24.04", last_patched: null } }
+  secret.stale:
+    fail: { secret: { enabled: true, updated: "2024-01-01T00:00:00Z" } }
+    pass: { secret: { enabled: true, updated: "2026-10-01T00:00:00Z" } }
+    nodata: { secret: { enabled: true } }
+  secret.untyped:
+    fail: { secret: { enabled: true, type: ssh public key, content_type: SSH Public Key } }
+    pass: { secret: { enabled: true, type: opaque, content_type: "opaque: an SSH public key" } }
+    nodata: { secret: { enabled: true } }

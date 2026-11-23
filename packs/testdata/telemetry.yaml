@@ -1,0 +1,62 @@
+# The telemetry pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. Each case is the
+# subject's facts. trellis_test.go holds every rule to its three answers.
+now: 2026-11-04T12:00:00Z
+decl: &decl { service: myapp, namespace: myapps, host: myapp.example.test, runtime: node, edge: both, public: true, page: true, max_label_values: 50 }
+loads: &loads { configured: true, loads: 3, evidence: [{ source: loki, query: page loads, got: 3 page loads }] }
+unread: &unread { error: "could not read the store: timeout", evidence: [] }
+ev: &ev [{ source: prometheus, query: up, got: no series }]
+
+rules:
+  telemetry.build-info:
+    fail: { telemetry: { declaration: *decl, build_info: { metric: myapp_build_info, series: 0, versions: [], unversioned: 0, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, build_info: { metric: myapp_build_info, series: 1, versions: [1.2.3], unversioned: 0, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, build_info: *unread } }
+  telemetry.http-duration:
+    fail: { telemetry: { declaration: *decl, http_duration: { reported: true, routes: ["/api/items/{id}"], unlabelled: false, declared: [/healthz, "/api/items/{id}"], edge_hits: { /healthz: 4 }, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, http_duration: { reported: true, routes: ["/api/items/{id}"], unlabelled: false, declared: [/healthz, "/api/items/{id}"], edge_hits: { /healthz: 0 }, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, http_duration: *unread } }
+  telemetry.process-cpu:
+    fail: { telemetry: { declaration: *decl, process_cpu: { metric: process_cpu_time_seconds_total, attribute: process_cpu_state, series: 1, values: [], evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, process_cpu: { metric: process_cpu_time_seconds_total, attribute: process_cpu_state, series: 2, values: [system, user], evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, process_cpu: *unread } }
+  telemetry.process-memory:
+    fail: { telemetry: { declaration: *decl, process_memory: { metric: process_memory_usage_bytes, attribute: process_memory_kind, series: 0, values: [], evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, process_memory: { metric: process_memory_usage_bytes, attribute: process_memory_kind, series: 2, values: [heap, total], evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, process_memory: *unread } }
+  telemetry.event-loop:
+    fail: { telemetry: { declaration: *decl, event_loop: { missing: [nodejs_eventloop_delay_max_seconds], evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, event_loop: { missing: [], evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, event_loop: *unread } }
+  telemetry.logs-json:
+    fail: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 1, no_timestamp: 0, no_level: 0, no_message: 0, kubelet: 0, first_not_json: starting up, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 0, no_timestamp: 0, no_level: 0, no_message: 0, kubelet: 2, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, logs: *unread } }
+  telemetry.logs-fields:
+    fail: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 0, no_timestamp: 1, no_level: 0, no_message: 2, kubelet: 0, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 0, no_timestamp: 0, no_level: 0, no_message: 0, kubelet: 0, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, logs: *unread } }
+  telemetry.logs-trace-id:
+    fail: { telemetry: { declaration: *decl, trace_ids: { lines: 100, traced: 0, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, trace_ids: { lines: 100, traced: 60, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, trace_ids: *unread } }
+  telemetry.cardinality:
+    fail: { telemetry: { declaration: *decl, cardinality: { series: 120, metrics: 3, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 60 }, { metric: myapp_build_info, label: version, values: 1 }], evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, cardinality: { series: 12, metrics: 3, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 3 }], evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, cardinality: *unread } }
+  telemetry.edge-router:
+    fail: { telemetry: { declaration: *decl, edge_router: { configured: true, routers: 0, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, edge_router: { configured: true, routers: 2, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, edge_router: { configured: false, routers: 0, evidence: [] } } }
+  telemetry.edge-views:
+    fail: { telemetry: { declaration: *decl, page_loads: *loads, edge_views: { configured: true, beacon: /api/view, views: 0, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, page_loads: *loads, edge_views: { configured: true, beacon: /api/view, views: 5, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, page_loads: *unread, edge_views: { configured: true, beacon: /api/view, views: 0, evidence: *ev } } }
+  telemetry.browser-logs:
+    fail: { telemetry: { declaration: *decl, page_loads: *loads, browser_logs: { app: myapp-web, lines: 0, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, page_loads: *loads, browser_logs: { app: myapp-web, lines: 10, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, page_loads: *loads, browser_logs: *unread } }
+  telemetry.browser-trace:
+    fail: { telemetry: { declaration: *decl, page_loads: *loads, browser_trace: { joined: [], web: 2, evidence: *ev } } }
+    pass: { telemetry: { declaration: *decl, page_loads: *loads, browser_trace: { joined: [abc123], web: 2, evidence: *ev } } }
+    nodata: { telemetry: { declaration: *decl, page_loads: *unread, browser_trace: { joined: [], web: 0, evidence: [] } } }

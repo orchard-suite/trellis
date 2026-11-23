@@ -1,0 +1,108 @@
+# What trellis's results add to an estate on the blueprint standard, for
+# Model → Import (or POST /v1/model/import). It assumes the sink writes
+# findings as sec_finding and plat_finding, verdicts as plat_verdict, and
+# weighed waivers as plat_weighed_waiver (its
+# `write` settings), and the source includes the standard mappings, so a
+# finding or a verdict links to an entity through a relation named after its
+# blueprint. trellis offers those blueprints itself on its first pass. Import
+# after the blueprint standard's sw and it packs and the Kubernetes model,
+# so the fields have targets. Importing again only adds what is missing.
+#
+# Each `trellis_<pack>_checks` field rolls the pack's checks up from the
+# entity's verdict: every counted rule that applies, by rule id, pass, fail,
+# or unknown. It holds no scorecard: the sink puts one per tiered pack, with
+# the pack's own rules, when its `scorecards` setting is
+# `{ field: trellis_{pack}_checks }`. The catalog counts trellis's answer and
+# never judges again. A rule trellis had no data for is unknown and holds
+# the entity below its level, and an entity no rule applies to has no
+# verdict and is out of the scorecard's scope, so neither counts as
+# conformant.
+blueprints:
+  - id: k8s_workload
+    title: Kubernetes workload
+    fields:
+      security_findings: { type: number, title: Security findings, description: trellis's open security findings on it., aggregation: { relation: '<-sec_finding:k8s_workload', fn: count } }
+      security_tier: { type: number, title: Security tier, description: "The security pack's tier trellis gave it: 1 baseline, 2 hardened, 0 none.", aggregation: { relation: '<-plat_verdict:k8s_workload', fn: max, field: tier_rank, where: { field: pack, op: eq, value: security } } }
+      trellis_security_checks: { type: object, summary: true, title: Security checks, description: "Each counted rule of trellis's security pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:k8s_workload', fn: checks, field: checks, where: { field: pack, op: eq, value: security } } }
+
+  - id: sw_repository
+    title: Repository
+    formerly: [repository]
+    fields:
+      security_findings: { type: number, title: Security findings, description: trellis's open security findings on it., aggregation: { relation: '<-sec_finding:sw_repository', fn: count } }
+      build_findings: { type: number, title: Build findings, description: trellis's open findings of the build pack on it., aggregation: { relation: '<-plat_finding:sw_repository', fn: count, where: { field: pack, op: eq, value: build } } }
+      security_tier: { type: number, title: Security tier, description: "The security pack's tier trellis gave it: 1 baseline, 2 hardened, 0 none.", aggregation: { relation: '<-plat_verdict:sw_repository', fn: max, field: tier_rank, where: { field: pack, op: eq, value: security } } }
+      trellis_security_checks: { type: object, summary: true, title: Security checks, description: "Each counted rule of trellis's security pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:sw_repository', fn: checks, field: checks, where: { field: pack, op: eq, value: security } } }
+      build_tier: { type: number, title: Build tier, description: "1 when trellis found the build pack met on it, 0 when not.", aggregation: { relation: '<-plat_verdict:sw_repository', fn: max, field: tier_rank, where: { field: pack, op: eq, value: build } } }
+      trellis_build_checks: { type: object, summary: true, title: Build checks, description: "Each counted rule of trellis's build pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:sw_repository', fn: checks, field: checks, where: { field: pack, op: eq, value: build } } }
+
+  - id: sw_workload
+    title: Workload
+    fields:
+      telemetry_findings: { type: number, title: Telemetry findings, description: trellis's open findings of the telemetry pack on it., aggregation: { relation: '<-plat_finding:sw_workload', fn: count, where: { field: pack, op: eq, value: telemetry } } }
+      telemetry_tier: { type: number, title: Telemetry tier, description: "1 when trellis found it in the telemetry contract, 0 when not.", aggregation: { relation: '<-plat_verdict:sw_workload', fn: max, field: tier_rank, where: { field: pack, op: eq, value: telemetry } } }
+      trellis_telemetry_checks: { type: object, summary: true, title: Telemetry checks, description: "Each counted rule of trellis's telemetry pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:sw_workload', fn: checks, field: checks, where: { field: pack, op: eq, value: telemetry } } }
+      catalog_findings: { type: number, title: Catalog findings, description: trellis's open findings of the catalog pack on it., aggregation: { relation: '<-plat_finding:sw_workload', fn: count, where: { field: pack, op: eq, value: catalog } } }
+      catalog_tier: { type: number, title: Catalog tier, description: "The catalog pack's tier trellis gave it: 1 described, 2 owned, 3 operable, 0 none.", aggregation: { relation: '<-plat_verdict:sw_workload', fn: max, field: tier_rank, where: { field: pack, op: eq, value: catalog } } }
+      trellis_catalog_checks: { type: object, summary: true, title: Catalog checks, description: "Each counted rule of trellis's catalog pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:sw_workload', fn: checks, field: checks, where: { field: pack, op: eq, value: catalog } } }
+
+  - id: program
+    title: Program
+    fields:
+      catalog_findings: { type: number, title: Catalog findings, description: trellis's open findings of the catalog pack on it., aggregation: { relation: '<-plat_finding:program', fn: count, where: { field: pack, op: eq, value: catalog } } }
+      catalog_tier: { type: number, title: Catalog tier, description: "The catalog pack's tier trellis gave it: 1 described, 2 owned, 0 none.", aggregation: { relation: '<-plat_verdict:program', fn: max, field: tier_rank, where: { field: pack, op: eq, value: catalog } } }
+      trellis_catalog_checks: { type: object, summary: true, title: Catalog checks, description: "Each counted rule of trellis's catalog pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:program', fn: checks, field: checks, where: { field: pack, op: eq, value: catalog } } }
+
+  - id: sw_container_image
+    title: Container image
+    fields:
+      security_findings: { type: number, title: Security findings, description: trellis's open security findings on it., aggregation: { relation: '<-sec_finding:sw_container_image', fn: count } }
+      security_tier: { type: number, title: Security tier, description: "The security pack's tier trellis gave it: 1 baseline, 2 hardened, 0 none.", aggregation: { relation: '<-plat_verdict:sw_container_image', fn: max, field: tier_rank, where: { field: pack, op: eq, value: security } } }
+      trellis_security_checks: { type: object, summary: true, title: Security checks, description: "Each counted rule of trellis's security pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:sw_container_image', fn: checks, field: checks, where: { field: pack, op: eq, value: security } } }
+
+  - id: it_hardware
+    title: Hardware
+    fields:
+      security_findings: { type: number, title: Security findings, description: trellis's open security findings on it., aggregation: { relation: '<-sec_finding:it_hardware', fn: count } }
+      security_tier: { type: number, title: Security tier, description: "The security pack's tier trellis gave it: 1 baseline, 2 hardened, 0 none.", aggregation: { relation: '<-plat_verdict:it_hardware', fn: max, field: tier_rank, where: { field: pack, op: eq, value: security } } }
+      trellis_security_checks: { type: object, summary: true, title: Security checks, description: "Each counted rule of trellis's security pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:it_hardware', fn: checks, field: checks, where: { field: pack, op: eq, value: security } } }
+
+  - id: it_workstation
+    title: Workstation
+    fields:
+      security_findings: { type: number, title: Security findings, description: trellis's open security findings on it., aggregation: { relation: '<-sec_finding:it_workstation', fn: count } }
+      security_tier: { type: number, title: Security tier, description: "The security pack's tier trellis gave it: 1 baseline, 2 hardened, 0 none.", aggregation: { relation: '<-plat_verdict:it_workstation', fn: max, field: tier_rank, where: { field: pack, op: eq, value: security } } }
+      trellis_security_checks: { type: object, summary: true, title: Security checks, description: "Each counted rule of trellis's security pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:it_workstation', fn: checks, field: checks, where: { field: pack, op: eq, value: security } } }
+
+  - id: it_virtual_machine
+    title: Virtual machine
+    fields:
+      security_findings: { type: number, title: Security findings, description: trellis's open security findings on it., aggregation: { relation: '<-sec_finding:it_virtual_machine', fn: count } }
+      security_tier: { type: number, title: Security tier, description: "The security pack's tier trellis gave it: 1 baseline, 2 hardened, 0 none.", aggregation: { relation: '<-plat_verdict:it_virtual_machine', fn: max, field: tier_rank, where: { field: pack, op: eq, value: security } } }
+      trellis_security_checks: { type: object, summary: true, title: Security checks, description: "Each counted rule of trellis's security pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:it_virtual_machine', fn: checks, field: checks, where: { field: pack, op: eq, value: security } } }
+
+  - id: it_application
+    title: Application
+    fields:
+      access_findings: { type: number, title: Access findings, description: trellis's open findings of the access pack on it., aggregation: { relation: '<-sec_finding:it_application', fn: count, where: { field: pack, op: eq, value: access } } }
+      access_tier: { type: number, title: Access tier, description: "The access pack's tier trellis gave it: 3 reviewed, 2 when its access review is missing or late, 0 none.", aggregation: { relation: '<-plat_verdict:it_application', fn: max, field: tier_rank, where: { field: pack, op: eq, value: access } } }
+      trellis_access_checks: { type: object, summary: true, title: Access checks, description: "Each counted rule of trellis's access pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:it_application', fn: checks, field: checks, where: { field: pack, op: eq, value: access } } }
+
+  - id: sw_api
+    title: API
+    formerly: [api]
+    fields:
+      interface_findings: { type: number, title: Interface findings, description: trellis's open findings of the interfaces pack on it., aggregation: { relation: '<-plat_finding:sw_api', fn: count, where: { field: pack, op: eq, value: interfaces } } }
+      interface_tier: { type: number, title: Interface tier, description: "The interfaces pack's tier trellis gave it: 1 defined, 2 shaped, 0 none.", aggregation: { relation: '<-plat_verdict:sw_api', fn: max, field: tier_rank, where: { field: pack, op: eq, value: interfaces } } }
+      trellis_interfaces_checks: { type: object, summary: true, title: Interfaces checks, description: "Each counted rule of trellis's interfaces pack that applies to it, by rule id: pass, fail, or unknown (no data). The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:sw_api', fn: checks, field: checks, where: { field: pack, op: eq, value: interfaces } } }
+
+  # An estate that reads Azure Policy through the azure_policy source, with
+  # its Azure resources in one list keyed by resource id. A list of another
+  # name takes the same fields under its own.
+  - id: azure_resource
+    title: Azure resource
+    fields:
+      security_findings: { type: number, title: Security findings, description: "trellis's open security findings on it, Azure Policy's among them.", aggregation: { relation: '<-sec_finding:azure_resource', fn: count } }
+      azure_policy_tier: { type: number, title: Azure Policy tier, description: "The Azure Policy pack's tier trellis gave it, from Azure's own verdicts: 1 for the lowest tier, 0 none.", aggregation: { relation: '<-plat_verdict:azure_resource', fn: max, field: tier_rank, where: { field: pack, op: eq, value: azure-policy } } }
+      trellis_azure_policy_checks: { type: object, summary: true, title: Azure Policy checks, description: "Each Azure policy that judges it, by trellis's rule id: pass, fail, or unknown (no data), as Azure judged it, a failure under a valid exemption counting as pass. The scorecard trellis puts for the pack reads one entry per rule.", aggregation: { relation: '<-plat_verdict:azure_resource', fn: checks, field: checks, where: { field: pack, op: eq, value: azure-policy } } }
+      waivers: { type: number, title: Waivers, description: "Every waiver trellis weighed on it, from Azure's exemptions or any other store, counting or not.", aggregation: { relation: '<-plat_weighed_waiver:azure_resource', fn: count } }

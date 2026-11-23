@@ -1,0 +1,1 @@
+{"status":"success","data":{"resultType":"vector","result":[{"metric":{"process_cpu_state":"user"},"value":[1793486527.6,"12.5"]},{"metric":{"process_cpu_state":"system"},"value":[1793486527.6,"3.1"]}]}}
