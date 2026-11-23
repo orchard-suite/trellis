@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.0.0](https://github.com/orchard-suite/trellis/compare/v5.8.1...v6.0.0) (2026-11-23)
+
+### ⚠ BREAKING CHANGES
+
+* **trellis:** open the source in orchard ([b67b2bb](https://github.com/orchard-suite/trellis/commit/b67b2bb7514fd6bf472bfe3d4c0ddba89fabc5ba))
+
+### Features
+
+* **trellis:** open the source in orchard ([b67b2bb](https://github.com/orchard-suite/trellis/commit/b67b2bb7514fd6bf472bfe3d4c0ddba89fabc5ba))
+
 ## [5.8.1](https://github.com/orchard-suite/trellis/compare/v5.8.0...v5.8.1) (2026-11-22)
 
 ### Bug Fixes
