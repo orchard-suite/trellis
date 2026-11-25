@@ -27,10 +27,15 @@
       "pattern": "^[a-z][a-z0-9-]*$",
       "description": "The Kubernetes namespace the service runs in."
     },
+    "app": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "The app label on the service's pods, when the workload is not named after the service. Defaults to the service name."
+    },
     "container": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$",
-      "description": "The container name when it is not the service name."
+      "description": "The container name when it is not the app label. Defaults to app."
     },
     "host": {
       "type": "string",
@@ -78,6 +83,15 @@
       "minimum": 1,
       "default": 50,
       "description": "How many values one label may take before the cardinality clause fails."
+    },
+    "catalog_gauges": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_:][a-zA-Z0-9_:]*$"
+      },
+      "description": "Metrics that carry one series per catalog value on purpose, such as a gauge of the fields an architect marks. The cardinality clause leaves them out of its count and names them."
     }
   }
 }

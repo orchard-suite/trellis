@@ -300,19 +300,22 @@ type Width struct {
 }
 
 // Cardinality is the service's series over the window, and its widest
-// labels, widest first.
+// labels, widest first. Widest leaves out the metrics the declaration names
+// as catalog gauges; their labels are in CatalogGauges, widest first, so
+// what was left out of the count is on the record.
 type Cardinality struct {
 	Read
-	Series  int     `json:"series"`
-	Metrics int     `json:"metrics"`
-	Widest  []Width `json:"widest"`
+	Series        int     `json:"series"`
+	Metrics       int     `json:"metrics"`
+	Widest        []Width `json:"widest"`
+	CatalogGauges []Width `json:"catalog_gauges"`
 }
 
 // widest is how many of the widest labels a measurement keeps.
 const widest = 20
 
 func (r *run) cardinality(ctx context.Context) Cardinality {
-	m := Cardinality{Widest: []Width{}}
+	m := Cardinality{Widest: []Width{}, CatalogGauges: []Width{}}
 	match := r.job()
 	series, err := r.src.Prometheus.Series(ctx, match, r.opt.Window)
 	ev := Evidence{Source: "prometheus", Query: fmt.Sprintf("series match[]=%s over %s", match, r.window())}
@@ -321,6 +324,10 @@ func (r *run) cardinality(ctx context.Context) Cardinality {
 		m.add(ev)
 		m.fail(err)
 		return m
+	}
+	gauge := map[string]bool{}
+	for _, g := range r.d.CatalogGauges {
+		gauge[g] = true
 	}
 	// metric -> label -> distinct values
 	values := map[string]map[string]map[string]bool{}
@@ -342,26 +349,61 @@ func (r *run) cardinality(ctx context.Context) Cardinality {
 	m.Series, m.Metrics = len(series), len(values)
 	for metric, labels := range values {
 		for l, vs := range labels {
-			m.Widest = append(m.Widest, Width{Metric: metric, Label: l, Values: len(vs)})
+			w := Width{Metric: metric, Label: l, Values: len(vs)}
+			if gauge[metric] {
+				m.CatalogGauges = append(m.CatalogGauges, w)
+			} else {
+				m.Widest = append(m.Widest, w)
+			}
 		}
 	}
-	sort.Slice(m.Widest, func(i, j int) bool {
-		a, b := m.Widest[i], m.Widest[j]
+	byWidth(m.Widest)
+	byWidth(m.CatalogGauges)
+	if len(m.Widest) > widest {
+		m.Widest = m.Widest[:widest]
+	}
+	if len(m.CatalogGauges) > widest {
+		m.CatalogGauges = m.CatalogGauges[:widest]
+	}
+	ev.Got = "no series"
+	if len(series) > 0 {
+		ev.Got = fmt.Sprintf("%d series across %d metrics", len(series), len(values))
+		if len(m.Widest) > 0 {
+			w := m.Widest[0]
+			ev.Got += fmt.Sprintf("; widest label %s on %s with %d values", w.Label, w.Metric, w.Values)
+		}
+		if len(m.CatalogGauges) > 0 {
+			ev.Got += "; not counted, as catalog gauges: " + strings.Join(widestPerMetric(m.CatalogGauges), ", ")
+		}
+	}
+	m.add(ev)
+	return m
+}
+
+// byWidth sorts widths widest first, then by metric and label.
+func byWidth(ws []Width) {
+	sort.Slice(ws, func(i, j int) bool {
+		a, b := ws[i], ws[j]
 		if a.Values != b.Values {
 			return a.Values > b.Values
 		}
 		return a.Metric+a.Label < b.Metric+b.Label
 	})
-	if len(m.Widest) > widest {
-		m.Widest = m.Widest[:widest]
+}
+
+// widestPerMetric names each metric's widest label, from widths sorted
+// widest first.
+func widestPerMetric(ws []Width) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range ws {
+		if seen[w.Metric] {
+			continue
+		}
+		seen[w.Metric] = true
+		out = append(out, fmt.Sprintf("%s{%s} with %d values", w.Metric, w.Label, w.Values))
 	}
-	ev.Got = "no series"
-	if len(series) > 0 {
-		w := m.Widest[0]
-		ev.Got = fmt.Sprintf("%d series across %d metrics; widest label %s on %s with %d values", len(series), len(values), w.Label, w.Metric, w.Values)
-	}
-	m.add(ev)
-	return m
+	return out
 }
 
 // EdgeRouter is the routers the edge's counter has for the host.

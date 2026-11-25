@@ -40,9 +40,13 @@ const (
 
 // Declaration is one service's trellis.yaml.
 type Declaration struct {
-	Service   string   `yaml:"service" json:"service"`
-	Title     string   `yaml:"title,omitempty" json:"title,omitempty"`
-	Namespace string   `yaml:"namespace" json:"namespace"`
+	Service   string `yaml:"service" json:"service"`
+	Title     string `yaml:"title,omitempty" json:"title,omitempty"`
+	Namespace string `yaml:"namespace" json:"namespace"`
+	// App is the app label on the service's pods, when the workload is not
+	// named after the service. It defaults to the service.
+	App string `yaml:"app,omitempty" json:"app,omitempty"`
+	// Container is the container the service runs in. It defaults to App.
 	Container string   `yaml:"container,omitempty" json:"container,omitempty"`
 	Host      string   `yaml:"host" json:"host"`
 	Routes    []string `yaml:"routes,omitempty" json:"routes,omitempty"`
@@ -53,6 +57,11 @@ type Declaration struct {
 	// MaxLabelValues is how many values one label may take on the service's
 	// metrics before the cardinality clause fails. Zero means the default.
 	MaxLabelValues int `yaml:"max_label_values,omitempty" json:"max_label_values,omitempty"`
+	// CatalogGauges are the metrics that carry one series per catalog value
+	// on purpose, such as a gauge of the fields an architect marks. Their
+	// labels grow with the catalog, so the cardinality clause leaves them
+	// out of its count and names them.
+	CatalogGauges []string `yaml:"catalog_gauges,omitempty" json:"catalog_gauges,omitempty"`
 }
 
 // DefaultMaxLabelValues is the house's bar: a label with more than a few
@@ -60,6 +69,7 @@ type Declaration struct {
 const DefaultMaxLabelValues = 50
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+var metricRE = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
 var hostRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
 // Load reads and validates one declaration file.
@@ -92,8 +102,11 @@ func Parse(raw []byte) (*Declaration, error) {
 }
 
 func (d *Declaration) applyDefaults() {
+	if d.App == "" {
+		d.App = d.Service
+	}
 	if d.Container == "" {
-		d.Container = d.Service
+		d.Container = d.App
 	}
 	if d.Title == "" {
 		d.Title = d.Service
@@ -119,6 +132,9 @@ func (d *Declaration) Validate() error {
 		bad("namespace", "required; the Kubernetes namespace the service runs in")
 	case !nameRE.MatchString(d.Namespace):
 		bad("namespace", fmt.Sprintf("%q must be lowercase letters, digits, and hyphens", d.Namespace))
+	}
+	if d.App != "" && !nameRE.MatchString(d.App) {
+		bad("app", fmt.Sprintf("%q must be lowercase letters, digits, and hyphens", d.App))
 	}
 	if d.Container != "" && !nameRE.MatchString(d.Container) {
 		bad("container", fmt.Sprintf("%q must be lowercase letters, digits, and hyphens", d.Container))
@@ -159,6 +175,17 @@ func (d *Declaration) Validate() error {
 	}
 	if d.MaxLabelValues < 0 {
 		bad("max_label_values", "must be a positive count")
+	}
+	seen := map[string]bool{}
+	for i, m := range d.CatalogGauges {
+		field := fmt.Sprintf("catalog_gauges[%d]", i)
+		switch {
+		case !metricRE.MatchString(m):
+			bad(field, fmt.Sprintf("%q must be a Prometheus metric name, such as myapp_field_value", m))
+		case seen[m]:
+			bad(field, fmt.Sprintf("%q is named twice", m))
+		}
+		seen[m] = true
 	}
 	return errors.Join(errs...)
 }

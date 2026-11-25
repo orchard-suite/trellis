@@ -19,7 +19,7 @@ public: true
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Container != "my-app" || d.Title != "my-app" || d.MaxLabelValues != DefaultMaxLabelValues {
+	if d.App != "my-app" || d.Container != "my-app" || d.Title != "my-app" || d.MaxLabelValues != DefaultMaxLabelValues {
 		t.Errorf("defaults not applied: %+v", d)
 	}
 	if d.Metric("build_info") != "my_app_build_info" || d.Web() != "my-app-web" {
@@ -38,6 +38,11 @@ func TestParseErrors(t *testing.T) {
 		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\nroutes: [items]\n", "routes[0]: \"items\" must be a route pattern"},
 		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\nslo: {availability: 0.99}\n", "field slo not found"},
 		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\npages: true\n", "field pages not found"},
+		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\napp: My_App\n", "app: \"My_App\" must be lowercase"},
+		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\napps: b\n", "field apps not found"},
+		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\ncatalog_gauges: [a-b]\n", "catalog_gauges[0]: \"a-b\" must be a Prometheus metric name"},
+		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\ncatalog_gauges: [a_b, a_b]\n", "catalog_gauges[1]: \"a_b\" is named twice"},
+		{"service: a\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\ncatalog_gauge: [a_b]\n", "field catalog_gauge not found"},
 	}
 	for _, c := range cases {
 		_, err := Parse([]byte(c.yaml))
@@ -56,5 +61,25 @@ func TestAllErrorsAtOnce(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in %v", want, err)
 		}
+	}
+}
+
+func TestTheAppLabelNamesTheWorkload(t *testing.T) {
+	d, err := Parse([]byte("service: my-app\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\napp: house-app\ncatalog_gauges: [my_app_field_value]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.App != "house-app" || d.Container != "house-app" {
+		t.Errorf("the container follows the app label: %+v", d)
+	}
+	if d.Metric("build_info") != "my_app_build_info" || d.Web() != "my-app-web" {
+		t.Errorf("metric and browser names stay the service's: %s %s", d.Metric("build_info"), d.Web())
+	}
+	if len(d.CatalogGauges) != 1 || d.CatalogGauges[0] != "my_app_field_value" {
+		t.Errorf("catalog gauges: %v", d.CatalogGauges)
+	}
+	d, err = Parse([]byte("service: my-app\nnamespace: x\nhost: a.b\nruntime: go\nedge: traefik\napp: house-app\ncontainer: main\n"))
+	if err != nil || d.App != "house-app" || d.Container != "main" {
+		t.Errorf("a named container wins: %+v %v", d, err)
 	}
 }

@@ -236,7 +236,8 @@ One short declaration per service says what it is:
 service: myapp              # also OTEL_SERVICE_NAME and the Prometheus job
 title: MyApp
 namespace: myapps
-container: myapp            # when not named after the service
+app: myapp                  # the pods' app label, when not named after the service
+container: myapp            # when not named after the app label
 host: myapp.example.org
 routes: [/healthz, "/api/items/{id}"]
 page: true                  # a page that reports browser telemetry as myapp-web
@@ -244,6 +245,7 @@ runtime: node               # go | node | rust | python
 edge: both                  # traefik | cloudflare | both
 public: false               # a public page reports one view per load
 max_label_values: 50
+catalog_gauges: [myapp_field_value]  # one series per catalog value, on purpose
 ```
 
 The `telemetry` source measures what the stores hold for each declared
@@ -254,7 +256,8 @@ rule reads as no data; when no store answers at all, the source misses
 the fact and the board carries the last one.
 How the estate's stores name things is the source's `labels` setting:
 `job`, `logs`, and `browser` default to OpenTelemetry's and the Kubernetes
-log collector's usual names; the edge's access log (`edge_access`,
+log collector's usual names, and fill `{service}`, `{namespace}`, `{app}`,
+`{container}`, `{host}`, `{host_dashed}`, and `{web}` from the declaration; the edge's access log (`edge_access`,
 `edge_path`, `edge_method`, `edge_status`, `browser_agent`), its router
 counter (`router`), and the public view beacon (`view_beacon`) are the
 estate's own, and the probes that need them answer that the edge is not
@@ -267,7 +270,7 @@ configured until they are set.
 | `process_cpu`, `process_memory` | series and the states or kinds seen | The process's CPU time by state and memory by kind are reported. |
 | `event_loop` | the series missing | Node only: event loop delay p99 and max are there. |
 | `logs`, `trace_ids` | a sample of recent lines and what each lacks | Lines are JSON with `timestamp`, `level`, and `msg`, and carry `trace_id`. |
-| `cardinality` | the widest labels | No label has more than `max_label_values` values. |
+| `cardinality` | the widest labels, and apart from them the labels of the `catalog_gauges` | No label has more than `max_label_values` values, on any metric but the catalog gauges, which the detail and the evidence name. |
 | `edge_router` | configured, routers | Traefik edge: a router serves the host. |
 | `page_loads`, `edge_views` | configured, loads, views | Public only: view reports reached the edge. |
 | `browser_logs`, `browser_trace` | lines, joined traces | Page only: browser lines exist, and a trace spans browser and server. |

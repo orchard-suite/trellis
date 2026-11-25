@@ -3,6 +3,8 @@
 # subject's facts. trellis_test.go holds every rule to its three answers.
 now: 2026-11-04T12:00:00Z
 decl: &decl { service: myapp, namespace: myapps, host: myapp.example.test, runtime: node, edge: both, public: true, page: true, max_label_values: 50 }
+# A service whose field gauge has one series per catalog value on purpose.
+gauged: &gauged { service: myapp, namespace: myapps, host: myapp.example.test, runtime: node, edge: both, public: true, page: true, max_label_values: 50, catalog_gauges: [myapp_field_value] }
 loads: &loads { configured: true, loads: 3, evidence: [{ source: loki, query: page loads, got: 3 page loads }] }
 unread: &unread { error: "could not read the store: timeout", evidence: [] }
 ev: &ev [{ source: prometheus, query: up, got: no series }]
@@ -41,9 +43,9 @@ rules:
     pass: { telemetry: { declaration: *decl, trace_ids: { lines: 100, traced: 60, evidence: *ev } } }
     nodata: { telemetry: { declaration: *decl, trace_ids: *unread } }
   telemetry.cardinality:
-    fail: { telemetry: { declaration: *decl, cardinality: { series: 120, metrics: 3, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 60 }, { metric: myapp_build_info, label: version, values: 1 }], evidence: *ev } } }
-    pass: { telemetry: { declaration: *decl, cardinality: { series: 12, metrics: 3, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 3 }], evidence: *ev } } }
-    nodata: { telemetry: { declaration: *decl, cardinality: *unread } }
+    fail: { telemetry: { declaration: *gauged, cardinality: { series: 560, metrics: 4, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 60 }, { metric: myapp_build_info, label: version, values: 1 }], catalog_gauges: [{ metric: myapp_field_value, label: key, values: 432 }], evidence: *ev } } }
+    pass: { telemetry: { declaration: *gauged, cardinality: { series: 444, metrics: 4, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 3 }], catalog_gauges: [{ metric: myapp_field_value, label: key, values: 432 }], evidence: *ev } } }
+    nodata: { telemetry: { declaration: *gauged, cardinality: *unread } }
   telemetry.edge-router:
     fail: { telemetry: { declaration: *decl, edge_router: { configured: true, routers: 0, evidence: *ev } } }
     pass: { telemetry: { declaration: *decl, edge_router: { configured: true, routers: 2, evidence: *ev } } }

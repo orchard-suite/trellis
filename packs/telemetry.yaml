@@ -1,7 +1,7 @@
 pack: telemetry
 title: Telemetry
 about: The telemetry contract
-version: 3.0.0
+version: 3.1.0
 family: platform
 # One tier: a service is in contract when no rule fails or lacks data, so
 # the catalog levels on the verdict and never counts missing data.
@@ -196,8 +196,15 @@ rules:
         : "more than %d values: ".format([int(telemetry.declaration.max_label_values)])
           + telemetry.cardinality.widest.filter(w, w.values > telemetry.declaration.max_label_values)
               .map(w, "%s{%s} has %d values".format([w.metric, w.label, int(w.values)])).join("; ")
+          + (has(telemetry.declaration.catalog_gauges)
+              ? "; not counted, as catalog gauges the declaration names: "
+                + telemetry.declaration.catalog_gauges.join(", ")
+              : "")
     evidence: telemetry.cardinality.evidence
-    fix: "Drop the label or bound it to a fixed set; never an id, a path, or a person."
+    fix: >-
+      Drop the label or bound it to a fixed set; never an id, a path, or a
+      person. A gauge with one series per catalog value on purpose goes in
+      the declaration's catalog_gauges.
 
   - id: telemetry.edge-router
     title: "edge router sees the host"

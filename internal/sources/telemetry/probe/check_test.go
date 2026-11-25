@@ -323,3 +323,50 @@ func TestTheEdgeUnsetSaysSo(t *testing.T) {
 		t.Errorf("an edge nobody configured: %+v %+v %+v", m.EdgeRouter, m.PageLoads, m.EdgeViews)
 	}
 }
+
+func TestTheAppLabelSelectsTheLogStream(t *testing.T) {
+	own := `{namespace="myapps", app="house", container="house"}`
+	fx := good()
+	for k, v := range fx {
+		if strings.Contains(k, stream) {
+			delete(fx, k)
+			fx[strings.ReplaceAll(k, stream, own)] = v
+		}
+	}
+	m := measure(t, "app: house\npage: true\nruntime: node\nedge: both\npublic: true\n", fx, Options{})
+	if m.Logs.Lines == 0 || !strings.HasPrefix(m.Logs.Evidence[0].Query, own) {
+		t.Errorf("logs: %+v", m.Logs)
+	}
+	if m.TraceIDs.Lines != 100 || m.TraceIDs.Traced != 60 || !strings.Contains(m.TraceIDs.Evidence[1].Query, own) {
+		t.Errorf("trace_ids: %+v", m.TraceIDs)
+	}
+	if m.BuildInfo.Series == 0 || m.BrowserLogs.Lines != 100 {
+		t.Errorf("metrics and the browser stay the service's: %+v %+v", m.BuildInfo, m.BrowserLogs)
+	}
+}
+
+func TestCatalogGaugesAreLeftOutOfTheCount(t *testing.T) {
+	fx := good()
+	fx["prometheus|series "+job] = "series_gauged"
+	m := measure(t, "catalog_gauges: [myapp_field_value]\npage: true\nruntime: node\nedge: both\npublic: true\n", fx, Options{})
+	c := m.Cardinality
+	if c.Series != 62 || c.Metrics != 3 {
+		t.Errorf("every series is counted: %+v", c)
+	}
+	for _, w := range c.Widest {
+		if w.Metric == "myapp_field_value" {
+			t.Errorf("a catalog gauge is among the widest: %+v", c.Widest)
+		}
+	}
+	if len(c.CatalogGauges) == 0 || c.CatalogGauges[0] != (Width{Metric: "myapp_field_value", Label: "key", Values: 60}) {
+		t.Errorf("catalog gauges: %+v", c.CatalogGauges)
+	}
+	if got := c.Evidence[0].Got; !strings.Contains(got, "not counted, as catalog gauges: myapp_field_value{key} with 60 values") {
+		t.Errorf("evidence: %s", got)
+	}
+	// Undeclared, the same gauge is the widest label.
+	m = measure(t, "", fx, Options{})
+	if w := m.Cardinality.Widest[0]; w.Metric != "myapp_field_value" || w.Values != 60 || len(m.Cardinality.CatalogGauges) != 0 {
+		t.Errorf("undeclared: %+v", m.Cardinality)
+	}
+}

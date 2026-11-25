@@ -48,7 +48,8 @@ type Sources struct {
 }
 
 // Labels say how the estate's stores name a service's signals, as
-// templates: {service}, {namespace}, {container}, {host}, {host_dashed}
+// templates: {service}, {namespace}, {app} (the pods' app label),
+// {container}, {host}, {host_dashed}
 // (the host with dots as dashes), and {web} (the service's browser app)
 // are filled from the declaration. The edge ones describe the estate's
 // edge access log; left empty, the measurements that ask the edge say it
@@ -80,7 +81,7 @@ type Labels struct {
 // usual names. The edge is the estate's own and has no default.
 var DefaultLabels = Labels{
 	Job:     `{job="{service}"}`,
-	Logs:    `{namespace="{namespace}", app="{service}", container="{container}"}`,
+	Logs:    `{namespace="{namespace}", app="{app}", container="{container}"}`,
 	Browser: `{app="{web}"}`,
 }
 
@@ -219,7 +220,7 @@ func Run(ctx context.Context, d *declaration.Declaration, src Sources, opt Optio
 // fill expands a label template for the service.
 func (r *run) fill(tpl string) string {
 	return strings.NewReplacer(
-		"{service}", r.d.Service, "{namespace}", r.d.Namespace, "{container}", r.d.Container,
+		"{service}", r.d.Service, "{namespace}", r.d.Namespace, "{app}", r.d.App, "{container}", r.d.Container,
 		"{host_dashed}", strings.ReplaceAll(r.d.Host, ".", "-"), "{host}", r.d.Host, "{web}", r.d.Web(),
 	).Replace(tpl)
 }
