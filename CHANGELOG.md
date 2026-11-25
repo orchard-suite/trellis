@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.1.1](https://github.com/orchard-suite/trellis/compare/v6.1.0...v6.1.1) (2026-11-25)
+
+### Bug Fixes
+
+* **trellis:** judge a quiet log window as no data ([58da50f](https://github.com/orchard-suite/trellis/commit/58da50fdf0ad1e7fb5f57f9996e73930db58143a))
+
 ## [6.1.0](https://github.com/orchard-suite/trellis/compare/v6.0.0...v6.1.0) (2026-11-25)
 
 ### Features
