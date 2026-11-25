@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,6 +37,7 @@ func good() fixtures {
 		"prometheus|series " + job: "series_ok",
 		`prometheus|sum by (router) (traefik_router_requests_total{router=~"myapps-.*myapp-example-test.*"})`: "routers_ok",
 		"loki|lines " + stream:                                          "lines_ok",
+		"loki|series " + stream:                                         "streams_one",
 		"loki|sum(count_over_time(" + stream + "[24h]))":                "count_100",
 		"loki|sum(count_over_time(" + stream + ` |= "trace_id" [24h]))`: "count_60",
 		`loki|sum(count_over_time({app="demarc", source="traefik-access", site="myapp.example.test"} |= "/api/view" [24h]))`: "count_60",
@@ -61,7 +63,7 @@ func serve(t *testing.T, store string, fx fixtures) string {
 		switch {
 		case r.URL.Path == "/api/v1/query", r.URL.Path == "/loki/api/v1/query":
 			key = q.Get("query")
-		case r.URL.Path == "/api/v1/series":
+		case r.URL.Path == "/api/v1/series", r.URL.Path == "/loki/api/v1/series":
 			key = "series " + q.Get("match[]")
 		case r.URL.Path == "/loki/api/v1/query_range":
 			key = "lines " + q.Get("query")
@@ -369,4 +371,53 @@ func TestCatalogGaugesAreLeftOutOfTheCount(t *testing.T) {
 	if w := m.Cardinality.Widest[0]; w.Metric != "myapp_field_value" || w.Values != 60 || len(m.Cardinality.CatalogGauges) != 0 {
 		t.Errorf("undeclared: %+v", m.Cardinality)
 	}
+}
+
+func TestAQuietWindowLooksForTheStream(t *testing.T) {
+	count := "loki|sum(count_over_time(" + stream + "[24h]))"
+	for _, c := range []struct {
+		name, streams string
+		want          int
+	}{{"quiet", "streams_one", 1}, {"never", "streams_none", 0}} {
+		t.Run(c.name, func(t *testing.T) {
+			fx := good()
+			fx["loki|lines "+stream] = "lines_none"
+			fx[count] = "count_0"
+			fx["loki|sum(count_over_time("+stream+` |= "trace_id" [24h]))`] = "count_0"
+			fx["loki|series "+stream] = c.streams
+			m := measure(t, "", fx, Options{})
+			for _, seen := range []*Seen{m.Logs.Seen, m.TraceIDs.Seen} {
+				if seen == nil || seen.Streams != c.want || seen.Lookback != "30d" {
+					t.Errorf("seen: %+v", seen)
+				}
+			}
+			ev := m.Logs.Evidence[len(m.Logs.Evidence)-1]
+			if ev.Query != "series match[]="+stream+" over 30d" {
+				t.Errorf("evidence: %+v", ev)
+			}
+		})
+	}
+	// A window with lines does not look.
+	m := measure(t, "", good(), Options{})
+	if m.Logs.Seen != nil || m.TraceIDs.Seen != nil {
+		t.Errorf("a window with lines looked for its stream: %+v %+v", m.Logs.Seen, m.TraceIDs.Seen)
+	}
+}
+
+func TestTheStreamLookupFailingIsUnread(t *testing.T) {
+	fx := good()
+	fx["loki|lines "+stream] = "lines_none"
+	delete(fx, "loki|series "+stream)
+	src := sources(t, fx)
+	src.Loki = streamsDown{src.Loki}
+	m := Run(context.Background(), decl(t, ""), src, Options{Labels: edge})
+	if !strings.Contains(m.Logs.Error, "could not read the store") || m.Logs.Seen != nil {
+		t.Errorf("logs: %+v", m.Logs)
+	}
+}
+
+type streamsDown struct{ stores.Loki }
+
+func (streamsDown) Streams(context.Context, string, time.Duration) (int, error) {
+	return 0, errors.New("refused")
 }

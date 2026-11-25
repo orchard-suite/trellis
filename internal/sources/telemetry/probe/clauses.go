@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // BuildInfo is the service's build_info gauge: how many series it has,
@@ -188,11 +189,50 @@ func (r *run) eventLoop(ctx context.Context) EventLoop {
 	return m
 }
 
+// Seen is the service's log stream looked for over the lookback, taken
+// when the window holds no line: how many streams the selector matched.
+// None means the selector names no stream the service ever wrote; some
+// means the service was only quiet.
+type Seen struct {
+	Lookback string `json:"lookback"`
+	Streams  int    `json:"streams"`
+}
+
+// streamSeen looks for the service's log stream over the lookback, once a
+// run, from Loki's index.
+func (r *run) streamSeen(ctx context.Context) (*Seen, Evidence, error) {
+	if r.seen == nil {
+		q := r.stream()
+		n, err := r.src.Loki.Streams(ctx, q, r.opt.Lookback)
+		look := lookback(r.opt.Lookback)
+		ev := Evidence{Source: "loki", Query: fmt.Sprintf("series match[]=%s over %s", q, look), Got: fmt.Sprintf("%d streams", n)}
+		if err != nil {
+			ev.Got = "error: " + err.Error()
+		}
+		r.seen = &seenRead{seen: Seen{Lookback: look, Streams: n}, ev: ev, err: err}
+	}
+	if r.seen.err != nil {
+		return nil, r.seen.ev, r.seen.err
+	}
+	seen := r.seen.seen
+	return &seen, r.seen.ev, nil
+}
+
+// lookback writes a duration in days when it is whole days.
+func lookback(d time.Duration) string {
+	if d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	return d.String()
+}
+
 // Logs is a sample of the newest log lines in the window: how many there
 // are, and how many are not JSON or lack each standard field. Lines the
 // kubelet wrote into the stream are counted apart and judged as nothing.
+// With no line in the window, Seen says whether the stream exists at all.
 type Logs struct {
 	Read
+	Seen         *Seen  `json:"seen,omitempty"`
 	Lines        int    `json:"lines"`
 	NotJSON      int    `json:"not_json"`
 	NoTimestamp  int    `json:"no_timestamp"`
@@ -264,14 +304,26 @@ func (r *run) logs(ctx context.Context) Logs {
 		ev.Got += "; first non-JSON line: " + m.FirstNotJSON
 	}
 	m.add(ev)
+	if len(lines) == 0 {
+		seen, ev, err := r.streamSeen(ctx)
+		m.add(ev)
+		if err != nil {
+			m.fail(err)
+			return m
+		}
+		m.Seen = seen
+	}
 	return m
 }
 
-// TraceIDs counts the window's log lines, and the ones that carry trace_id.
+// TraceIDs counts the window's log lines, and the ones that carry
+// trace_id. With no line in the window, Seen says whether the stream
+// exists at all.
 type TraceIDs struct {
 	Read
-	Lines  int `json:"lines"`
-	Traced int `json:"traced"`
+	Lines  int   `json:"lines"`
+	Traced int   `json:"traced"`
+	Seen   *Seen `json:"seen,omitempty"`
 }
 
 func (r *run) traceIDs(ctx context.Context) TraceIDs {
@@ -288,6 +340,16 @@ func (r *run) traceIDs(ctx context.Context) TraceIDs {
 	m.add(ev)
 	if err != nil {
 		m.fail(err)
+		return m
+	}
+	if m.Lines == 0 {
+		seen, ev, err := r.streamSeen(ctx)
+		m.add(ev)
+		if err != nil {
+			m.fail(err)
+			return m
+		}
+		m.Seen = seen
 	}
 	return m
 }

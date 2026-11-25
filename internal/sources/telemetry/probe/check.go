@@ -106,10 +106,15 @@ type Options struct {
 	Window time.Duration
 	// Sample is how many recent log lines the log measurement reads.
 	Sample int
+	// Lookback is how far back a log stream with no lines in the window is
+	// looked for, to tell a quiet service from a selector that matches no
+	// stream at all.
+	Lookback time.Duration
 }
 
-// DefaultOptions is a day back and a hundred lines.
-var DefaultOptions = Options{Window: 24 * time.Hour, Sample: 100}
+// DefaultOptions is a day back, a hundred lines, and thirty days to look
+// for a quiet stream.
+var DefaultOptions = Options{Window: 24 * time.Hour, Sample: 100, Lookback: 30 * 24 * time.Hour}
 
 // Measures are everything one run saw of one service. A measurement the
 // declaration makes meaningless is not taken and stays nil: event_loop for
@@ -173,6 +178,14 @@ type run struct {
 	d   *declaration.Declaration
 	src Sources
 	opt Options
+	// seen is the log stream looked for over the lookback, once a run.
+	seen *seenRead
+}
+
+type seenRead struct {
+	seen Seen
+	ev   Evidence
+	err  error
 }
 
 // Run measures one service.
@@ -182,6 +195,9 @@ func Run(ctx context.Context, d *declaration.Declaration, src Sources, opt Optio
 	}
 	if opt.Sample <= 0 {
 		opt.Sample = DefaultOptions.Sample
+	}
+	if opt.Lookback <= 0 {
+		opt.Lookback = DefaultOptions.Lookback
 	}
 	opt.Labels = opt.Labels.withDefaults()
 	r := &run{d: d, src: src, opt: opt}

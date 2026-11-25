@@ -50,6 +50,9 @@ type Loki interface {
 	Lines(ctx context.Context, logql string, window time.Duration, limit int) ([]Line, error)
 	// Count runs an instant metric query, such as sum(count_over_time(...[1h])).
 	Count(ctx context.Context, logql string) (float64, error)
+	// Streams counts the streams a selector matched over the window, from
+	// the index alone, without reading a line.
+	Streams(ctx context.Context, selector string, window time.Duration) (int, error)
 }
 
 // Tempo is what the clauses ask of Tempo.

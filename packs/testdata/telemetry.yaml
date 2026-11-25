@@ -8,6 +8,8 @@ gauged: &gauged { service: myapp, namespace: myapps, host: myapp.example.test, r
 loads: &loads { configured: true, loads: 3, evidence: [{ source: loki, query: page loads, got: 3 page loads }] }
 unread: &unread { error: "could not read the store: timeout", evidence: [] }
 ev: &ev [{ source: prometheus, query: up, got: no series }]
+# A window with no log line from a stream the service wrote before: quiet.
+quiet: &quiet { lines: 0, not_json: 0, no_timestamp: 0, no_level: 0, no_message: 0, kubelet: 0, seen: { lookback: 30d, streams: 1 }, evidence: *ev }
 
 rules:
   telemetry.build-info:
@@ -33,15 +35,15 @@ rules:
   telemetry.logs-json:
     fail: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 1, no_timestamp: 0, no_level: 0, no_message: 0, kubelet: 0, first_not_json: starting up, evidence: *ev } } }
     pass: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 0, no_timestamp: 0, no_level: 0, no_message: 0, kubelet: 2, evidence: *ev } } }
-    nodata: { telemetry: { declaration: *decl, logs: *unread } }
+    nodata: { telemetry: { declaration: *decl, logs: *quiet } }
   telemetry.logs-fields:
     fail: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 0, no_timestamp: 1, no_level: 0, no_message: 2, kubelet: 0, evidence: *ev } } }
     pass: { telemetry: { declaration: *decl, logs: { lines: 2, not_json: 0, no_timestamp: 0, no_level: 0, no_message: 0, kubelet: 0, evidence: *ev } } }
-    nodata: { telemetry: { declaration: *decl, logs: *unread } }
+    nodata: { telemetry: { declaration: *decl, logs: *quiet } }
   telemetry.logs-trace-id:
     fail: { telemetry: { declaration: *decl, trace_ids: { lines: 100, traced: 0, evidence: *ev } } }
     pass: { telemetry: { declaration: *decl, trace_ids: { lines: 100, traced: 60, evidence: *ev } } }
-    nodata: { telemetry: { declaration: *decl, trace_ids: *unread } }
+    nodata: { telemetry: { declaration: *decl, trace_ids: { lines: 0, traced: 0, seen: { lookback: 30d, streams: 1 }, evidence: *ev } } }
   telemetry.cardinality:
     fail: { telemetry: { declaration: *gauged, cardinality: { series: 560, metrics: 4, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 60 }, { metric: myapp_build_info, label: version, values: 1 }], catalog_gauges: [{ metric: myapp_field_value, label: key, values: 432 }], evidence: *ev } } }
     pass: { telemetry: { declaration: *gauged, cardinality: { series: 444, metrics: 4, widest: [{ metric: http_server_request_duration_seconds_count, label: http_route, values: 3 }], catalog_gauges: [{ metric: myapp_field_value, label: key, values: 432 }], evidence: *ev } } }

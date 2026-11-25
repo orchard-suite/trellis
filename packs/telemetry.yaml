@@ -1,7 +1,7 @@
 pack: telemetry
 title: Telemetry
 about: The telemetry contract
-version: 3.1.0
+version: 3.2.0
 family: platform
 # One tier: a service is in contract when no rule fails or lacks data, so
 # the catalog levels on the verdict and never counts missing data.
@@ -122,11 +122,13 @@ rules:
     standard: make-the-observability-standard-a-tool-not-prose
     pillar: platform/observability
     needs: { telemetry.logs: the service was not measured }
-    unknown: [{ if: has(telemetry.logs.error), explain: telemetry.logs.error }]
+    unknown:
+      - { if: has(telemetry.logs.error), explain: telemetry.logs.error }
+      - { if: telemetry.logs.lines == 0 && !(has(telemetry.logs.seen) && telemetry.logs.seen.streams == 0), explain: '"no log lines in the window"' }
     check: telemetry.logs.lines > 0 && telemetry.logs.not_json == 0
     detail: >-
       telemetry.logs.lines == 0
-        ? "no log lines in the window; the service logs nothing or its stream labels differ"
+        ? "the log selector matches no stream in the last " + telemetry.logs.seen.lookback + "; set the declaration's app, container, or namespace to the workload's own labels"
         : "%d of %d lines are not JSON".format([int(telemetry.logs.not_json), int(telemetry.logs.lines)])
           + (has(telemetry.logs.first_not_json) ? "; the first: " + telemetry.logs.first_not_json : "")
     evidence: telemetry.logs.evidence
@@ -141,13 +143,15 @@ rules:
     standard: make-the-observability-standard-a-tool-not-prose
     pillar: platform/observability
     needs: { telemetry.logs: the service was not measured }
-    unknown: [{ if: has(telemetry.logs.error), explain: telemetry.logs.error }]
+    unknown:
+      - { if: has(telemetry.logs.error), explain: telemetry.logs.error }
+      - { if: telemetry.logs.lines == 0 && !(has(telemetry.logs.seen) && telemetry.logs.seen.streams == 0), explain: '"no log lines in the window"' }
     check: >-
       telemetry.logs.lines > 0 && telemetry.logs.not_json == 0 && telemetry.logs.no_timestamp == 0
         && telemetry.logs.no_level == 0 && telemetry.logs.no_message == 0
     detail: >-
       telemetry.logs.lines == 0
-        ? "no log lines in the window"
+        ? "the log selector matches no stream in the last " + telemetry.logs.seen.lookback + "; set the declaration's app, container, or namespace to the workload's own labels"
         : "of %d lines, ".format([int(telemetry.logs.lines)]) + [
             telemetry.logs.no_timestamp > 0 ? "%d lack timestamp".format([int(telemetry.logs.no_timestamp)]) : "",
             telemetry.logs.no_level > 0 ? "%d lack level".format([int(telemetry.logs.no_level)]) : "",
@@ -166,11 +170,13 @@ rules:
     standard: make-the-observability-standard-a-tool-not-prose
     pillar: platform/observability
     needs: { telemetry.trace_ids: the service was not measured }
-    unknown: [{ if: has(telemetry.trace_ids.error), explain: telemetry.trace_ids.error }]
+    unknown:
+      - { if: has(telemetry.trace_ids.error), explain: telemetry.trace_ids.error }
+      - { if: telemetry.trace_ids.lines == 0 && !(has(telemetry.trace_ids.seen) && telemetry.trace_ids.seen.streams == 0), explain: '"no log lines in the window"' }
     check: telemetry.trace_ids.lines > 0 && telemetry.trace_ids.traced > 0
     detail: >-
       telemetry.trace_ids.lines == 0
-        ? "no log lines in the window"
+        ? "the log selector matches no stream in the last " + telemetry.trace_ids.seen.lookback + "; set the declaration's app, container, or namespace to the workload's own labels"
         : "none of %d lines carries trace_id; lines inside a request or job must".format([int(telemetry.trace_ids.lines)])
     evidence: telemetry.trace_ids.evidence
     fix: "Log with the request's context so each line carries trace_id."

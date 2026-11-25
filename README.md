@@ -261,7 +261,9 @@ log collector's usual names, and fill `{service}`, `{namespace}`, `{app}`,
 `edge_path`, `edge_method`, `edge_status`, `browser_agent`), its router
 counter (`router`), and the public view beacon (`view_beacon`) are the
 estate's own, and the probes that need them answer that the edge is not
-configured until they are set.
+configured until they are set. `lookback` (30 days, `720h`) is how far back
+a service with no log line in the window has its stream looked for; keep it
+within the log store's retention and its longest query.
 
 | Measurement | What it holds | The rule passes when |
 |---|---|---|
@@ -269,7 +271,7 @@ configured until they are set.
 | `http_duration` | reported, routes, unlabelled, declared, edge_hits | Durations carry `http_route`, and every declared route the edge served in the window appears. |
 | `process_cpu`, `process_memory` | series and the states or kinds seen | The process's CPU time by state and memory by kind are reported. |
 | `event_loop` | the series missing | Node only: event loop delay p99 and max are there. |
-| `logs`, `trace_ids` | a sample of recent lines and what each lacks | Lines are JSON with `timestamp`, `level`, and `msg`, and carry `trace_id`. |
+| `logs`, `trace_ids` | a sample of recent lines and what each lacks; with no line in the window, `seen`: the streams the selector matched over `lookback` | Lines are JSON with `timestamp`, `level`, and `msg`, and carry `trace_id`. A window with no line is no data, unless the selector matched no stream over the lookback, which fails: the declaration names the wrong labels. |
 | `cardinality` | the widest labels, and apart from them the labels of the `catalog_gauges` | No label has more than `max_label_values` values, on any metric but the catalog gauges, which the detail and the evidence name. |
 | `edge_router` | configured, routers | Traefik edge: a router serves the host. |
 | `page_loads`, `edge_views` | configured, loads, views | Public only: view reports reached the edge. |

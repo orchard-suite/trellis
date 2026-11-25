@@ -51,6 +51,7 @@ func init() {
 			Tempo        string       `yaml:"tempo"`
 			Window       string       `yaml:"window"`
 			Sample       int          `yaml:"sample"`
+			Lookback     string       `yaml:"lookback"`
 			Labels       probe.Labels `yaml:"labels"`
 			// Catalog is the blueprint a declared service is an entity of.
 			Catalog string `yaml:"catalog"`
@@ -71,6 +72,13 @@ func init() {
 				return nil, fmt.Errorf("window %q is not a duration", c.Window)
 			}
 			opt.Window = d
+		}
+		if c.Lookback != "" {
+			d, err := time.ParseDuration(c.Lookback)
+			if err != nil {
+				return nil, fmt.Errorf("lookback %q is not a duration", c.Lookback)
+			}
+			opt.Lookback = d
 		}
 		return New(c.Declarations, Stores(c.Prometheus, c.Loki, c.Tempo), opt, c.Catalog, env.Log), nil
 	})

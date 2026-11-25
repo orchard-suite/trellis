@@ -274,3 +274,62 @@ func TestEveryBuiltInRuleHasAnAim(t *testing.T) {
 		}
 	}
 }
+
+// TestAQuietLogStreamSaysNothing holds the log rules to no data on a
+// window with no line, unless the selector matched no stream over the
+// lookback, which is the declaration's fault and fails.
+func TestAQuietLogStreamSaysNothing(t *testing.T) {
+	set, err := pack.Load(Packs(), "", []string{"telemetry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC)
+	decl := map[string]any{"service": "myapp", "namespace": "myapps", "host": "myapp.example.test", "runtime": "go", "edge": "cloudflare"}
+	logs := func(seen map[string]any, kubelet int) map[string]any {
+		m := map[string]any{"lines": 0, "not_json": 0, "no_timestamp": 0, "no_level": 0, "no_message": 0, "kubelet": kubelet, "evidence": []any{}}
+		if seen != nil {
+			m["seen"] = seen
+		}
+		return m
+	}
+	traces := func(seen map[string]any) map[string]any {
+		m := map[string]any{"lines": 0, "traced": 0, "evidence": []any{}}
+		if seen != nil {
+			m["seen"] = seen
+		}
+		return m
+	}
+	never := map[string]any{"lookback": "30d", "streams": 0}
+	unread := map[string]any{"error": "could not read the store: timeout", "evidence": []any{}}
+	cases := []struct {
+		name, fact string
+		value      map[string]any
+		want       pack.Status
+		detail     string
+	}{
+		{"no stream ever", "logs", logs(never, 0), pack.Fail, "the log selector matches no stream in the last 30d"},
+		{"quiet", "logs", logs(map[string]any{"lookback": "30d", "streams": 1}, 0), pack.NoData, "no log lines in the window"},
+		{"only kubelet lines", "logs", logs(nil, 2), pack.NoData, "no log lines in the window"},
+		{"store down", "logs", unread, pack.NoData, "could not read the store: timeout"},
+		{"quiet", "trace_ids", traces(map[string]any{"lookback": "30d", "streams": 1}), pack.NoData, "no log lines in the window"},
+		{"no stream ever", "trace_ids", traces(never), pack.Fail, "the log selector matches no stream in the last 30d"},
+		{"store down", "trace_ids", unread, pack.NoData, "could not read the store: timeout"},
+	}
+	rules := map[string][]string{"logs": {"telemetry.logs-json", "telemetry.logs-fields"}, "trace_ids": {"telemetry.logs-trace-id"}}
+	for _, c := range cases {
+		for _, id := range rules[c.fact] {
+			r, ok := set.Rule(id)
+			if !ok {
+				t.Fatalf("no rule %s", id)
+			}
+			s := estate.New(now).Writer("fixture").Subject(r.Kind, "myapp", "myapp")
+			if err := s.Set("telemetry", map[string]any{"declaration": decl, c.fact: c.value}); err != nil {
+				t.Fatal(err)
+			}
+			res := r.Judge(pack.Prepare(s.Subject, now, nil), nil)
+			if res.Status != c.want || !strings.HasPrefix(res.Detail, c.detail) {
+				t.Errorf("%s, %s: answered %s: %q, want %s: %q", id, c.name, res.Status, res.Detail, c.want, c.detail)
+			}
+		}
+	}
+}

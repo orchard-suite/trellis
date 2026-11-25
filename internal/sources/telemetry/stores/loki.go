@@ -82,3 +82,20 @@ func (l loki) Count(ctx context.Context, logql string) (float64, error) {
 	}
 	return total, nil
 }
+
+func (l loki) Streams(ctx context.Context, selector string, window time.Duration) (int, error) {
+	now := time.Now()
+	params := url.Values{
+		"match[]": {selector},
+		"start":   {strconv.FormatInt(now.Add(-window).UnixNano(), 10)},
+		"end":     {strconv.FormatInt(now.UnixNano(), 10)},
+	}
+	var r struct {
+		Status string              `json:"status"`
+		Data   []map[string]string `json:"data"`
+	}
+	if err := l.get(ctx, "/loki/api/v1/series", params, &r); err != nil {
+		return 0, err
+	}
+	return len(r.Data), nil
+}
