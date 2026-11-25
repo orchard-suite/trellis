@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.1.0](https://github.com/orchard-suite/trellis/compare/v6.0.0...v6.1.0) (2026-11-25)
+
+### Features
+
+* **trellis:** add app and catalog_gauges fields ([eadcd9e](https://github.com/orchard-suite/trellis/commit/eadcd9e1eea6134b366a7a43edc860e359fba6f5))
+
 ## [6.0.0](https://github.com/orchard-suite/trellis/compare/v5.8.1...v6.0.0) (2026-11-23)
 
 ### ⚠ BREAKING CHANGES
