@@ -25,7 +25,8 @@ trellis knows they may.
 An operator needs to make the board run a pass now, for example after a
 catalog blueprint gained the fields the sink writes. The session port
 trusts the sign-in proxy's headers and is reached through a browser. The
-health port trusts nothing and must stay that way for the kubelet. A
+machine door (once the health port) takes only callers' bearer tokens,
+for the judge, and its probes need none. A
 machine caller, such as an agent or a person at a terminal, had no way in
 short of restarting the board.
 
@@ -45,13 +46,13 @@ short of restarting the board.
 
 - `internal/config` checks the address; never relax the check.
 - A new operator action is a route on `Server.Control()`, never on the
-  health port, and never a session route that skips the gate.
+  machine door, and never a session route that skips the gate.
 
 ## Verification
 
 - `internal/config` tests refuse `:8082`, `0.0.0.0:8082`, and a private
   address, and accept the loopback forms.
-- The server tests prove the health port does not run a pass.
+- The server tests prove the machine door does not run a pass.
 
 ## Consequences
 
