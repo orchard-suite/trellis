@@ -957,8 +957,10 @@ watch then saw harm), the `blind` (passed, ran, and no watch could see),
 and the `needless` asks (asked, ran, and the watch saw them clean), and
 exits 1 on a miss. `-packs-dir` tries a folder of gate packs beside the
 configured ones, and `-catalog=false` skips the pass of the sources that
-gives the rules the catalog. Annals keeps no part a writer could not name,
-so a replay judges none.
+gives the rules the catalog. A change's record keeps its whole statement, unknown parts
+and all, so the `unknown` fence fires in a replay as it did live; a
+record stored before Annals kept the statement's own part replays without
+them, and `partial` counts those.
 
 ## Findings in the catalog
 

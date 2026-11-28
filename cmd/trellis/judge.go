@@ -230,7 +230,7 @@ func printTally(w io.Writer, t gate.Tally) {
 	fmt.Fprintf(w, "misses   %d passed, and the watch then saw harm\n", t.Misses)
 	fmt.Fprintf(w, "blind    %d passed, ran, and no watch could see what they did\n", t.Blind)
 	fmt.Fprintf(w, "needless %d asked, ran, and the watch saw them clean\n", t.Needless)
-	if t.Unnamed {
-		fmt.Fprintln(w, "note     Annals keeps no part a writer could not name, so the replay judged none")
+	if t.Partial > 0 {
+		fmt.Fprintf(w, "partial  %d stated before Annals kept unknown parts, so none of theirs was judged\n", t.Partial)
 	}
 }

@@ -19,6 +19,10 @@ type Past struct {
 	Key       string
 	At        time.Time
 	Statement change.Statement
+	// Partial says the record was stored before Annals kept a statement's
+	// own part, so it holds no unknown parts, writer version, artifact, or
+	// claim rules: the unknown fence cannot fire on a part of it.
+	Partial bool
 	// Ended is the change.ended outcome (ok, failed, or refused), or empty
 	// when no change.ended record came.
 	Ended string
@@ -40,9 +44,6 @@ type sighting struct {
 // ready to replay.
 type History struct {
 	Changes []*Past
-	// Unnamed says Annals keeps no unknown parts of a statement, so a
-	// replay judges none: the unknown fence never fires on a part in it.
-	Unnamed bool
 	sights  []sighting
 }
 
@@ -50,12 +51,15 @@ type History struct {
 // and the change.ended and change.observed records whose cause names one.
 // A record of another verb is ignored.
 func Join(records []annals.Event) *History {
-	h := &History{Unnamed: true}
+	h := &History{}
 	type id struct{ sender, key string }
 	byID := map[id]*Past{}
 	for _, ev := range records {
 		if ev.Action.Verb == change.EventStated {
-			p := &Past{Sender: ev.Source, Key: ev.EventKey, At: ev.At, Statement: statementOf(ev)}
+			p := &Past{Sender: ev.Source, Key: ev.EventKey, At: ev.At, Statement: ev.StatementOf(), Partial: ev.Statement == nil}
+			if p.Statement.Key == "" {
+				p.Statement.Key = ev.EventKey
+			}
 			byID[id{ev.Source, ev.EventKey}] = p
 			h.Changes = append(h.Changes, p)
 		}
@@ -93,34 +97,6 @@ func worse(a, b string) string {
 	return a
 }
 
-// statementOf is the statement a change.stated record keeps: its actor, its
-// things, its effects, its applier, and its writer's name. Annals keeps no
-// artifact, writer version, claim rule, or unknown part.
-func statementOf(ev annals.Event) change.Statement {
-	st := change.Statement{
-		Key:     ev.EventKey,
-		Writer:  change.Writer{Name: ev.Labels["writer"]},
-		Actor:   change.Actor{Kind: ev.Actor.Kind, ID: ev.Actor.ID, OnBehalfOf: ev.Actor.OnBehalfOf},
-		Applier: ev.Labels["applier"],
-	}
-	for _, it := range ev.Items {
-		if it.System == "catalog" {
-			st.Things = append(st.Things, change.Ref{Blueprint: it.Kind, Key: it.ID})
-		}
-	}
-	for _, ef := range ev.Effects {
-		st.Effects = append(st.Effects, change.Effect{
-			Kind:    ef.Kind,
-			Subject: change.Ref{Blueprint: ef.Subject.Blueprint, Key: ef.Subject.Key},
-			Path:    ef.Path,
-			Size:    ef.Size,
-			Undo:    ef.Undo,
-			Claim:   change.Claim{From: ef.Claim},
-		})
-	}
-	return st
-}
-
 // Tally is what a replay found: over how many past changes, how many the
 // pack would have asked of people and passed, and of those it passed, how
 // many the watch then saw do harm (misses) or could not see (blind).
@@ -139,8 +115,10 @@ type Tally struct {
 	// Needless are changes asked of people that ran and the watch saw
 	// clean.
 	Needless int `json:"needless"`
-	// Unnamed says the history held no unknown parts to judge.
-	Unnamed bool `json:"unnamed"`
+	// Partial are changes judged whose record was stored before Annals
+	// kept a statement's own part, so none of their unknown parts was
+	// judged.
+	Partial int `json:"partial"`
 }
 
 // Replay judges every past change in the history with one gate pack as a
@@ -152,7 +130,7 @@ func (j *Judge) Replay(ctx context.Context, h *History, packID string, now Proof
 	if !ok {
 		return Tally{}, fmt.Errorf("replay: no gate pack %q; the judge's are %s", packID, j.Pack())
 	}
-	t := Tally{Pack: p.Ref(), Since: since, Until: until, Unnamed: h.Unnamed}
+	t := Tally{Pack: p.Ref(), Since: since, Until: until}
 	memo := &memo{of: now, got: map[annals.ProofKey]memoed{}}
 	for _, c := range h.Changes {
 		if c.At.Before(since) || !c.At.Before(until) {
@@ -171,6 +149,9 @@ func (j *Judge) Replay(ctx context.Context, h *History, packID string, now Proof
 			return t, fmt.Errorf("replay %s/%s: %w", c.Sender, c.Key, err)
 		}
 		t.Changes++
+		if c.Partial {
+			t.Partial++
+		}
 		if route.To == change.RoutePeople {
 			t.Asked++
 			if c.Ran() && c.Saw == change.VerdictClean {

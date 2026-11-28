@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,7 +65,7 @@ func TestReplayCountsAsksAndMisses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Tally{Pack: "gate@1.0.0", Since: t1, Until: t4.Add(time.Hour), Changes: 4, Asked: 2, Passed: 2, Misses: 1, Blind: 1, Needless: 2, Unnamed: true}
+	want := Tally{Pack: "gate@1.0.0", Since: t1, Until: t4.Add(time.Hour), Changes: 4, Asked: 2, Passed: 2, Misses: 1, Blind: 1, Needless: 2, Partial: 4}
 	if got != want {
 		t.Fatalf("replay\n got %+v\nwant %+v", got, want)
 	}
@@ -121,4 +122,38 @@ type slowAnnals struct{}
 func (slowAnnals) Proof(ctx context.Context, _ annals.ProofKey) (*annals.Proof, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+// A record that keeps the whole statement replays its unknown parts, which
+// meet the unknown fence; one stored before it did replays without them.
+func TestReplayJudgesUnknownParts(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	opens := annals.Effect{Kind: "opens", Subject: annals.Subject{Blueprint: "app", Key: "beacon"}, Path: "in-place", Undo: "yes", Claim: "writer", ClaimRule: "listener", ClaimVersion: "4.2.0"}
+	whole := stated("c1", at, "hub", opens)
+	whole.Statement = &annals.Statement{
+		Key:      "run-1001",
+		Writer:   change.Writer{Name: "infra", Version: "3.1.0"},
+		Things:   []change.Ref{{Blueprint: "app", Key: "beacon"}},
+		Artifact: change.Artifact{Kind: "plan", Digest: "sha256:" + strings.Repeat("a", 64)},
+		Unknown:  []change.Unknown{{Thing: &change.Ref{Blueprint: "app", Key: "beacon"}, Part: "settings.feature_x", Why: change.WhyUnnamed}},
+	}
+	older := stated("c2", at.Add(time.Hour), "hub", opens)
+	h := Join([]annals.Event{
+		whole, after(change.EventEnded, "c1", at.Add(time.Minute), "ok"),
+		older, after(change.EventEnded, "c2", at.Add(time.Hour+time.Minute), "ok"),
+	})
+	if h.Changes[0].Statement.Key != "run-1001" || h.Changes[0].Statement.Effects[0].Claim.Rule != "listener" || h.Changes[0].Partial {
+		t.Fatalf("the whole statement: %+v", h.Changes[0])
+	}
+	if h.Changes[1].Statement.Key != "c2" || !h.Changes[1].Partial {
+		t.Fatalf("an older record keys the change by its event key: %+v", h.Changes[1])
+	}
+	j := newJudge(t, gatePacks(t, nil), &fakeAnnals{}, nil)
+	got, err := j.Replay(t.Context(), h, "gate", &fakeAnnals{}, at, at.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Changes != 2 || got.Asked != 1 || got.Passed != 1 || got.Partial != 1 {
+		t.Fatalf("the unknown part asks people; the older record passes: %+v", got)
+	}
 }
