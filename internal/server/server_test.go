@@ -27,6 +27,9 @@ import (
 
 const publicURL = "https://trellis.test"
 
+// orreryToken is the machine door's token for the caller orrery.
+const orreryToken = "test-token-0000000000000000000000000000"
+
 // fixtureSource is a small estate with one failing image and one clean
 // repository.
 type fixtureSource struct{}
@@ -67,7 +70,7 @@ type harness struct {
 	t       *testing.T
 	srv     *Server
 	session http.Handler
-	health  http.Handler
+	machine http.Handler
 	control http.Handler
 	// asked has one value for each pass the server asked for.
 	asked chan struct{}
@@ -98,11 +101,11 @@ func newHarnessRelaying(t *testing.T, faroCfg relay.Config, srcs ...sources.Name
 		h.asked <- struct{}{}
 		return b.Check(ctx)
 	}
-	srv, err := New(Config{PublicURL: publicURL, Estate: "test", SignIn: door.Config{Roles: []string{"Viewer"}}, Version: "test"}, b, rel, log, check, nil)
+	srv, err := New(Config{PublicURL: publicURL, Estate: "test", SignIn: door.Config{Roles: []string{"Viewer"}}, Version: "test", Callers: map[string][]byte{"orrery": []byte(orreryToken)}}, b, rel, log, check, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.srv, h.session, h.health, h.control = srv, srv.Session(), srv.Health(), srv.Control()
+	h.srv, h.session, h.machine, h.control = srv, srv.Session(), srv.Machine(), srv.Control()
 	if len(srcs) > 0 {
 		b.Refresh(context.Background())
 	}
@@ -245,17 +248,17 @@ func TestFailedSourceIsReported(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	h := newHarness(t)
-	if rec := h.do(h.health, httptest.NewRequest("GET", "/healthz", nil)); rec.Code != http.StatusOK {
+	if rec := h.do(h.machine, httptest.NewRequest("GET", "/healthz", nil)); rec.Code != http.StatusOK {
 		t.Errorf("healthz: %d", rec.Code)
 	}
-	if rec := h.do(h.health, httptest.NewRequest("GET", "/readyz", nil)); rec.Code != http.StatusServiceUnavailable {
+	if rec := h.do(h.machine, httptest.NewRequest("GET", "/readyz", nil)); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("readyz before a snapshot: %d", rec.Code)
 	}
-	if rec := h.do(h.health, httptest.NewRequest("GET", "/v1/board", nil)); rec.Code != http.StatusNotFound {
+	if rec := h.do(h.machine, httptest.NewRequest("GET", "/v1/board", nil)); rec.Code != http.StatusNotFound {
 		t.Errorf("the health port serves nothing else: %d", rec.Code)
 	}
 	ready := newHarness(t, fixture)
-	if rec := ready.do(ready.health, httptest.NewRequest("GET", "/readyz", nil)); rec.Code != http.StatusOK {
+	if rec := ready.do(ready.machine, httptest.NewRequest("GET", "/readyz", nil)); rec.Code != http.StatusOK {
 		t.Errorf("readyz after a snapshot: %d", rec.Code)
 	}
 }
@@ -291,7 +294,7 @@ func TestControlRunsAPassAndAnswersWhenItIsDone(t *testing.T) {
 	if !pass.RefreshedAt.After(before) || len(pass.Sources) != 1 || pass.Sent == nil {
 		t.Errorf("a new pass with its sources and sends: %+v", pass)
 	}
-	if rec := h.do(h.health, httptest.NewRequest("POST", "/v1/refresh", nil)); rec.Code == http.StatusOK {
+	if rec := h.do(h.machine, httptest.NewRequest("POST", "/v1/refresh", nil)); rec.Code == http.StatusOK {
 		t.Error("the health port runs no pass")
 	}
 }

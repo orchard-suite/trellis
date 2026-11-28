@@ -140,7 +140,11 @@ func runBoard(path, extraPacks string, once bool) error {
 	if hist != nil {
 		past = hist
 	}
-	srv, err := server.New(server.Config{PublicURL: cfg.PublicURL, Estate: cfg.Estate, SignIn: cfg.SignIn, Version: version}, b, rel, log, b.Check, past)
+	callers, err := cfg.Machine.Tokens(cfg.Dir)
+	if err != nil {
+		return fail(err)
+	}
+	srv, err := server.New(server.Config{PublicURL: cfg.PublicURL, Estate: cfg.Estate, SignIn: cfg.SignIn, Version: version, Callers: callers}, b, rel, log, b.Check, past)
 	if err != nil {
 		return fail(err)
 	}
@@ -162,7 +166,7 @@ func runBoard(path, extraPacks string, once bool) error {
 		handler http.Handler
 	}{
 		{cfg.Listen.Session, srv.Session()},
-		{cfg.Listen.Health, srv.Health()},
+		{cfg.Listen.Machine, srv.Machine()},
 		{cfg.Listen.Control, srv.Control()},
 	}
 	if cfg.Listen.Profile != "" {
@@ -191,7 +195,7 @@ func runBoard(path, extraPacks string, once bool) error {
 	for _, p := range set.Packs {
 		packs = append(packs, p.ID+"@"+p.Version)
 	}
-	log.Info("trellis started", "estate", cfg.Estate, "public_url", cfg.PublicURL, "sources", strings.Join(names, ","), "packs", strings.Join(packs, ","), "refresh_interval", time.Duration(cfg.Refresh).String(), "control", cfg.Listen.Control)
+	log.Info("trellis started", "estate", cfg.Estate, "public_url", cfg.PublicURL, "sources", strings.Join(names, ","), "packs", strings.Join(packs, ","), "refresh_interval", time.Duration(cfg.Refresh).String(), "machine", cfg.Listen.Machine, "callers", len(callers), "control", cfg.Listen.Control)
 
 	select {
 	case <-ctx.Done():

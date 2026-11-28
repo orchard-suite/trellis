@@ -11,15 +11,17 @@ spec:
       port: 80
       targetPort: session
 ---
-# The probes, with no identity.
+# The machine door: bearer tokens only, never identity headers. The probes
+# need no token; the judge, POST /v1/judge, takes a caller's. Let the
+# estate's network policy admit the callers config.yaml names.
 apiVersion: v1
 kind: Service
 metadata:
-  name: trellis-health
+  name: trellis-machine
 spec:
   selector:
     app: trellis
   ports:
     - name: http
       port: 8081
-      targetPort: health
+      targetPort: machine

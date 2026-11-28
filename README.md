@@ -40,7 +40,7 @@ hands in, with gate packs of its own, and answers who must look first
 | `trellis once -config config.yaml [-packs-dir drafts/]` | One pass, printed. `-packs-dir` tries packs on the real estate before they are switched on. |
 | `trellis check [-dir .] [-packs build,interfaces] [-fail-on high] [-waivers file]` | Judges a repository checkout: its tree, the APIs its `orrery.yaml` offers with what changed since the latest release tag, and, given a declaration and the stores, its telemetry. Exits 1 on a finding at or over `-fail-on`. |
 | `trellis refresh [-control 127.0.0.1:8082] [-timeout 20m]` | Asks the running board for a pass now, waits for it and its sends, and prints how each source read and each sink took it. Exits 1 when one failed. |
-| `trellis judge [-control 127.0.0.1:8082] [statement.json]` | Hands one change statement, from the file or stdin, to the running board's judge and prints the answer: the route, its reasons, and each draft's. Exits 1 when the statement is refused. |
+| `trellis judge [-machine 127.0.0.1:8081] [-token-file file] [statement.json]` | Hands one change statement, from the file or stdin, to the running board's judge on its machine door, as a caller with its token (`$TRELLIS_TOKEN` or `-token-file`), and prints the answer: the route, its reasons, and each draft's. Exits 1 when the statement is refused. |
 | `trellis replay -config config.yaml -pack id [-packs-dir drafts/] [-since 30d]` | Judges a gate pack over the past changes Annals keeps, joined to what each did, and prints how many it would have asked of people and how many it would have passed that then did harm. Exits 1 on a miss. |
 | `trellis test [-packs-dir packs]` | Holds an estate's packs to their fixtures before they are switched on: a failing, a passing, and a no-data case for every rule. |
 | `trellis schema` | The JSON Schema of a telemetry declaration. |
@@ -635,6 +635,8 @@ sinks:
     write: { finding_security: sec_finding, finding_platform: plat_finding, verdict: plat_verdict, pack: plat_pack, pillar: plat_pillar }
     scorecards: { field: "trellis_{pack}_checks" }   # optional: a scorecard per tiered pack
 browser_telemetry: { url: "${FARO_URL}", key: "${FARO_API_KEY}" }
+machine:                     # who may call the machine door, by token
+  callers: [{ name: orrery, token: "${TRELLIS_ORRERY_TOKEN}" }]
 gate:                        # the judge of one change: The judge, below
   packs: [acme-gate]
   default_approvers: [{ field: team, values: [platform] }]
@@ -661,13 +663,32 @@ corner should not hold every group red, while a critical finding still
 does. Subjects keep their own worst-of level either way.
 
 The session port trusts the sign-in proxy's headers, so the network must
-let only that proxy reach it. The health port answers `/healthz` and
-`/readyz` and trusts nothing.
+let only that proxy reach it. The machine door, `listen.machine`, is
+`:8081` unless set (`listen.health`, its old name, sets the same address).
+It takes bearer tokens only and never reads an identity header, so a
+forged header from inside the cluster proves nothing. It answers the
+probes, `/healthz` and `/readyz`, with no token, and `POST /v1/judge`,
+[the judge](#the-judge), to the callers `machine.callers` names:
+
+```yaml
+machine:
+  callers:
+    - { name: orrery, token: "${TRELLIS_ORRERY_TOKEN}" }          # from the environment
+    - { name: deploy-bot, token_file: /var/run/secrets/trellis/deploy-bot }   # a file the estate mounts
+```
+
+A token is `${NAME}` or a `token_file`, never text in the settings, at
+least 32 characters, and each caller's own; trellis refuses to start
+otherwise, and with a `gate` and no caller. A call with no token, another
+scheme, or a token no caller has is `401`, and the log says the route and
+why, never the token; an admitted call logs the route and the caller. A
+token file is read at start, so a new token takes a restart. Let the
+estate's network policy admit only the callers to the port.
 
 The control port, `listen.control`, is `127.0.0.1:8082` unless set, and
-trellis refuses any address that is not loopback. It answers two routes:
+trellis refuses any address that is not loopback. It answers one route,
 `POST /v1/refresh`, which runs a pass and answers when the pass and its
-sends are done, and `POST /v1/judge`, [the judge](#the-judge). Whoever may exec into the pod, or forward a port to it,
+sends are done. Whoever may exec into the pod, or forward a port to it,
 may ask; nobody else can reach it. After a change the board should see
 now, such as a field added to a catalog blueprint, ask for a pass instead
 of restarting the board or waiting for the next one:
@@ -771,13 +792,15 @@ the board's, with its own packs, and it is off the board: no gate rule is a
 finding, a count, or a catalog write.
 
 ```
-POST /v1/judge                    on the control port
+POST /v1/judge                    on the machine door, with a caller's token
+Authorization: Bearer <token>
 {"statement": <change.Statement>}
 ```
 
 | Answer | When |
 |---|---|
 | `200` `{"judge": {"name": "trellis", "version", "pack"}, "route", "reasons", "drafts"}` | The judge answered. |
+| `401` `{"error": "unauthorized", ...}` | No token, or one no caller in `machine.callers` has. |
 | `400` `{"error", "reason"}` | The kit's validator refused the statement, against the base effect kinds and every gate pack's; `error` is the kit's reason, such as `unknown_kind` or `bad_applier`. Also `bad_json` and `missing_statement`. |
 | `503` `{"error": "judge_off", ...}` | The settings have no `gate`. |
 | `500` `{"error": "judge_failed", ...}` | The answer would break the kit's rules for a route. |
@@ -796,11 +819,12 @@ not count yet, whole (`status: draft`) or in part (a rule drafted, or
 announced with `from`), what it would have answered: the base pack's
 counted rules and its own, as if it counted alone.
 
-`trellis judge` hands a statement to the running board, so it gives the
-very answer the runner gets:
+`trellis judge` hands a statement to the running board as a caller, so it
+gives the very answer the runner gets:
 
 ```bash
-kubectl -n trellis exec -i deploy/trellis -- /app/trellis judge < statement.json
+kubectl -n trellis port-forward svc/trellis-machine 8081 &
+TRELLIS_TOKEN=... trellis judge statement.json
 ```
 
 ### Gate packs
@@ -894,7 +918,7 @@ them as `safe_path` subjects, which `gate.safe_paths` names.
 
 | Setting | What it does |
 |---|---|
-| `gate` | Turns the judge on. Without it `POST /v1/judge` answers `503`. |
+| `gate` | Turns the judge on. Without it `POST /v1/judge` answers `503`. With it, `machine.callers` names at least one caller. |
 | `gate.packs` | The estate's gate packs in `packs.dir`, in order, beside the base pack. A draft among them only answers in `drafts`. At most 8. |
 | `gate.default_approvers` | Required. Who decides when a fence or a rule asks people and no rule named anyone: a list of grants, such as `[{ field: team, values: [platform] }]`. The judge does not start without them. |
 | `gate.annals` | `url` (the API port) and `token` (a reader token Annals issued): where proof is read and replays read past changes. Without it no disruption is proven past claimed. |

@@ -2,15 +2,18 @@
 //
 //   - Session: the board, its JSON, and the browser telemetry relay. Trusts
 //     the sign-in proxy's headers, so only that proxy may reach it.
-//   - Health: /healthz and /readyz for the kubelet. Nothing else.
-//   - Control: a pass on demand for trellis refresh, and the judge of one
-//     change for trellis judge. It listens on loopback only, so whoever may
-//     exec into the pod may ask, and nobody else.
+//   - Machine: the machine door. Bearer tokens only, never identity
+//     headers: /healthz and /readyz for the kubelet with no token, and the
+//     judge of one change, POST /v1/judge, for the callers the settings
+//     name.
+//   - Control: a pass on demand for trellis refresh. It listens on loopback
+//     only, so whoever may exec into the pod may ask, and nobody else.
 package server
 
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -43,6 +46,9 @@ type Config struct {
 	Estate  string
 	SignIn  door.Config
 	Version string
+	// Callers are who may call the machine door's /v1 routes, by name,
+	// each with its bearer token.
+	Callers map[string][]byte
 }
 
 // Server is the two handlers over one board.
@@ -149,9 +155,11 @@ func appFile(name, contentType string) http.Handler {
 	})
 }
 
-// Health is the kubelet's port.
-func (s *Server) Health() http.Handler {
+// Machine is the machine door: the kubelet's probes with no token, and the
+// /v1 routes for the callers the settings name, by bearer token alone.
+func (s *Server) Machine() http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("POST /v1/judge", s.bearer(http.HandlerFunc(s.judgeNow)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.cfg.Version})
 	})
@@ -162,7 +170,38 @@ func (s *Server) Health() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	return obs.Handler(mux, "health")
+	return obs.Handler(mux, "machine")
+}
+
+// bearer admits a call whose Authorization header carries a caller's token,
+// compared in constant time with every caller's, and refuses any other with
+// 401. It reads no other header: on the machine door an identity header
+// proves nothing. It logs both, with the route and never the token.
+func (s *Server) bearer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		route := r.Method + " " + r.URL.Path
+		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		caller := ""
+		if ok && tok != "" {
+			for name, want := range s.cfg.Callers {
+				if subtle.ConstantTimeCompare([]byte(tok), want) == 1 {
+					caller = name
+				}
+			}
+		}
+		if caller == "" {
+			why := "no bearer token"
+			if ok && tok != "" {
+				why = "a token no caller has"
+			}
+			s.log.WarnContext(r.Context(), "machine call refused", "route", route, "why", why)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="trellis"`)
+			writeJSON(w, http.StatusUnauthorized, JudgeError{Error: "unauthorized", Reason: "the machine door takes a caller's bearer token"})
+			return
+		}
+		s.log.InfoContext(r.Context(), "machine call admitted", "route", route, "caller", caller)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
@@ -358,11 +397,10 @@ func (s *Server) refreshNow(w http.ResponseWriter, r *http.Request) {
 }
 
 // Control is the operator's port: POST /v1/refresh runs a pass and answers
-// when it and its sends are done, and POST /v1/judge routes one change.
+// when it and its sends are done.
 func (s *Server) Control() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/refresh", s.refreshWait)
-	mux.HandleFunc("POST /v1/judge", s.judgeNow)
 	return obs.Handler(mux, "control")
 }
 

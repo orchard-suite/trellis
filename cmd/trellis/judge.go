@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/orchard-suite/platformkit/v3/annals"
@@ -24,14 +25,27 @@ import (
 	"github.com/orchard-suite/trellis/internal/obs"
 )
 
-// runJudge hands one statement to the running board's judge on its control
-// port and prints the answer, so it is the very judgment the runner gets.
+// runJudge hands one statement to the running board's judge on its machine
+// door, as a caller with its token, and prints the answer, so it is the
+// very judgment the runner gets.
 func runJudge(args []string) error {
 	fs := flag.NewFlagSet("judge", flag.ContinueOnError)
-	control := fs.String("control", config.DefaultControl, "the running board's control address (listen.control)")
+	machine := fs.String("machine", "127.0.0.1:8081", "the running board's machine door (listen.machine)")
+	tokenFile := fs.String("token-file", "", "a file holding a caller's token; $TRELLIS_TOKEN unless set")
 	timeout := fs.Duration("timeout", time.Minute, "how long to wait for the answer")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	token := os.Getenv("TRELLIS_TOKEN")
+	if *tokenFile != "" {
+		raw, err := os.ReadFile(*tokenFile)
+		if err != nil {
+			return err
+		}
+		token = strings.TrimSpace(string(raw))
+	}
+	if token == "" {
+		return errors.New("judge: the machine door takes a caller's token: set TRELLIS_TOKEN or -token-file")
 	}
 	in := io.Reader(os.Stdin)
 	if f := fs.Arg(0); f != "" && f != "-" {
@@ -48,7 +62,7 @@ func runJudge(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
-	status, body, err := askJudge(ctx, http.DefaultClient, "http://"+*control+"/v1/judge", raw)
+	status, body, err := askJudge(ctx, http.DefaultClient, "http://"+*machine+"/v1/judge", token, raw)
 	if err != nil {
 		return err
 	}
@@ -67,8 +81,9 @@ func runJudge(args []string) error {
 	return fmt.Errorf("the judge answered %d", status)
 }
 
-// askJudge posts a statement, as it was written, to a judge.
-func askJudge(ctx context.Context, client *http.Client, url string, statement []byte) (int, []byte, error) {
+// askJudge posts a statement, as it was written, to a judge, with a caller's
+// token.
+func askJudge(ctx context.Context, client *http.Client, url, token string, statement []byte) (int, []byte, error) {
 	body, err := json.Marshal(struct {
 		Statement json.RawMessage `json:"statement"`
 	}{bytes.TrimSpace(statement)})
@@ -80,9 +95,10 @@ func askJudge(ctx context.Context, client *http.Client, url string, statement []
 		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
 	res, err := client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("no board answered on its control port: %w", err)
+		return 0, nil, fmt.Errorf("no board answered on its machine door: %w", err)
 	}
 	defer res.Body.Close()
 	got, err := io.ReadAll(io.LimitReader(res.Body, 16<<20))

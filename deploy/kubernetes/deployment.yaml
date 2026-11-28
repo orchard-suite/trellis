@@ -35,7 +35,7 @@ spec:
               drop: [ALL]
           ports:
             - { containerPort: 8080, name: session }
-            - { containerPort: 8081, name: health }
+            - { containerPort: 8081, name: machine }
           env:
             - { name: TRELLIS_CONFIG, value: /etc/trellis/config/config.yaml }
             - { name: TUF_ROOT, value: /tuf }
@@ -52,10 +52,10 @@ spec:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { cpu: "1", memory: 512Mi }
           livenessProbe:
-            httpGet: { path: /healthz, port: health }
+            httpGet: { path: /healthz, port: machine }
             periodSeconds: 30
           readinessProbe:
-            httpGet: { path: /healthz, port: health }
+            httpGet: { path: /healthz, port: machine }
             periodSeconds: 10
       volumes:
         - name: config

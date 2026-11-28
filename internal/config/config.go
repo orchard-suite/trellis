@@ -37,7 +37,13 @@ type Config struct {
 	Refresh Duration `yaml:"refresh"`
 	Listen  struct {
 		Session string `yaml:"session"`
-		Health  string `yaml:"health"`
+		// Machine is the machine door: bearer tokens only, never identity
+		// headers. It serves the probes, /healthz and /readyz, with no
+		// token, and POST /v1/judge to the callers Machine names.
+		Machine string `yaml:"machine"`
+		// Health is the machine door's old name, from when it served the
+		// probes alone; it sets the same address.
+		Health string `yaml:"health"`
 		// Profile is where Go's profiles of the process are served; nowhere
 		// unless set.
 		Profile string `yaml:"profile"`
@@ -66,9 +72,12 @@ type Config struct {
 		Webhook *Webhook `yaml:"webhook"`
 	} `yaml:"sinks"`
 	History *History `yaml:"history"`
-	// Gate turns the judge on: the call on the control port that routes
+	// Gate turns the judge on: the call on the machine door that routes
 	// one change handed in.
-	Gate             *Gate `yaml:"gate"`
+	Gate *Gate `yaml:"gate"`
+	// Machine names who may call the machine door, each with a bearer
+	// token.
+	Machine          Machine `yaml:"machine"`
 	BrowserTelemetry struct {
 		URL string `yaml:"url"`
 		Key string `yaml:"key"`
@@ -97,6 +106,58 @@ type Orrery struct {
 	Write orrery.Write `yaml:"write"`
 	// Scorecards, when set, puts one hub scorecard per tiered pack.
 	Scorecards *orrery.Scorecards `yaml:"scorecards"`
+}
+
+// Machine is who may call the machine door. A token is never the settings
+// file's text: it is written as ${NAME}, filled from the environment, or
+// read from token_file, a file the estate mounts.
+type Machine struct {
+	Callers []Caller `yaml:"callers"`
+}
+
+// Caller is one machine that may call the machine door: its name, which the
+// logs say, and its token, as ${NAME} or in TokenFile.
+type Caller struct {
+	Name      string `yaml:"name"`
+	Token     string `yaml:"token"`
+	TokenFile string `yaml:"token_file"`
+}
+
+// MinToken is the shortest token a caller may have.
+const MinToken = 32
+
+var callerName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// Tokens reads each caller's token: its ${NAME} value, or its file's first
+// line, relative to dir. A token shorter than MinToken, or one two callers
+// share, is refused.
+func (m Machine) Tokens(dir string) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	seen := map[string]string{}
+	for _, c := range m.Callers {
+		tok := c.Token
+		if c.TokenFile != "" {
+			path := c.TokenFile
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(dir, path)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("machine.callers %s: token_file: %w", c.Name, err)
+			}
+			tok, _, _ = strings.Cut(string(raw), "\n")
+			tok = strings.TrimSpace(tok)
+		}
+		if len(tok) < MinToken {
+			return nil, fmt.Errorf("machine.callers %s: its token is under %d characters", c.Name, MinToken)
+		}
+		if other, dup := seen[tok]; dup {
+			return nil, fmt.Errorf("machine.callers %s and %s share a token; give each caller its own", other, c.Name)
+		}
+		seen[tok] = c.Name
+		out[c.Name] = []byte(tok)
+	}
+	return out, nil
 }
 
 // Gate is the judge of changes handed in: which of the estate's gate packs
@@ -192,6 +253,9 @@ func Parse(raw []byte) (*Config, error) {
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	if err := tokensFromEnv(&doc); err != nil {
+		return nil, err
+	}
 	var missing []string
 	var fill func(n *yaml.Node)
 	fill = func(n *yaml.Node) {
@@ -232,9 +296,16 @@ func Parse(raw []byte) (*Config, error) {
 	if c.Listen.Session == "" {
 		c.Listen.Session = ":8080"
 	}
-	if c.Listen.Health == "" {
-		c.Listen.Health = ":8081"
+	switch {
+	case c.Listen.Machine == "":
+		c.Listen.Machine = c.Listen.Health
+	case c.Listen.Health != "" && c.Listen.Health != c.Listen.Machine:
+		return nil, fmt.Errorf("config: listen.health is the machine door's old name; set listen.machine alone")
 	}
+	if c.Listen.Machine == "" {
+		c.Listen.Machine = ":8081"
+	}
+	c.Listen.Health = c.Listen.Machine
 	if c.Listen.Control == "" {
 		c.Listen.Control = DefaultControl
 	}
@@ -301,8 +372,57 @@ func Parse(raw []byte) (*Config, error) {
 		if a := g.Annals; a != nil && (a.URL == "" || a.Token == "") {
 			return nil, fmt.Errorf("config: gate.annals needs url and token")
 		}
+		if len(c.Machine.Callers) == 0 {
+			return nil, fmt.Errorf("config: machine.callers: the judge is on the machine door, which admits only the callers named there with their tokens; name at least one")
+		}
+	}
+	names := map[string]bool{}
+	for _, cl := range c.Machine.Callers {
+		switch {
+		case !callerName.MatchString(cl.Name):
+			return nil, fmt.Errorf("config: machine.callers: %q is not a lowercase name", cl.Name)
+		case names[cl.Name]:
+			return nil, fmt.Errorf("config: machine.callers names %s twice", cl.Name)
+		case (cl.Token == "") == (cl.TokenFile == ""):
+			return nil, fmt.Errorf("config: machine.callers %s: give token, as ${NAME}, or token_file, not both", cl.Name)
+		}
+		names[cl.Name] = true
 	}
 	return &c, nil
+}
+
+// tokensFromEnv refuses a caller's token written as text in the file: it is
+// ${NAME}, filled from the environment, or a token_file.
+func tokensFromEnv(doc *yaml.Node) error {
+	root := doc
+	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
+		root = root.Content[0]
+	}
+	callers := field(field(root, "machine"), "callers")
+	if callers == nil {
+		return nil
+	}
+	for _, c := range callers.Content {
+		if tok := field(c, "token"); tok != nil && !wholeRef.MatchString(tok.Value) {
+			return fmt.Errorf("config: line %d: machine.callers token is written as ${NAME}, from the environment, or as a token_file; never as text in the settings", tok.Line)
+		}
+	}
+	return nil
+}
+
+var wholeRef = regexp.MustCompile(`^\$\{[A-Z_][A-Z0-9_]*\}$`)
+
+// field is a mapping node's value under key, or nil.
+func field(n *yaml.Node, key string) *yaml.Node {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
 }
 
 // Options are the estate's positions as the judge takes them, with set's

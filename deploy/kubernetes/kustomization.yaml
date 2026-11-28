@@ -2,8 +2,8 @@
 # Change config.yaml for the estate, put the estate's own packs and their
 # fixtures in packs/, and give the Secret trellis-secrets the values the
 # config names as ${NAME}. Put a sign-in proxy in front of the Service
-# trellis and let only that proxy reach it; the Service trellis-health
-# answers the probes and trusts nothing.
+# trellis and let only that proxy reach it; the Service trellis-machine is
+# the machine door, which answers the probes and takes bearer tokens only.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: trellis

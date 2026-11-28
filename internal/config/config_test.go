@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -137,11 +139,69 @@ func TestGateNeedsDefaultApprovers(t *testing.T) {
   default_approvers: [{ field: team, values: [platform] }]
   annals: { url: https://annals.example.test, token: test-token }
   safe_paths: safe_path
+machine:
+  callers: [{ name: orrery, token_file: orrery-token }]
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if g := c.Gate; g.Packs[0] != "acme-gate" || g.DefaultApprovers[0].Values[0] != "platform" || g.Annals.Token != "test-token" || g.SafePaths != "safe_path" {
 		t.Fatalf("gate %+v", g)
+	}
+}
+
+// A machine door caller's token is ${NAME} or a mounted file, never text in
+// the settings; a short or shared token is refused.
+func TestMachineCallersTokens(t *testing.T) {
+	t.Setenv("TEST_ORRERY_TOKEN", "tok")
+	t.Setenv("TEST_CALLER_TOKEN", "test-token-0000000000000000000000000000")
+	if _, err := Parse([]byte(sample + "machine: { callers: [{ name: orrery, token: test-token-0000000000000000000000000000 }] }\n")); err == nil || !strings.Contains(err.Error(), "never as text") {
+		t.Fatalf("a token written in the settings: %v", err)
+	}
+	if _, err := Parse([]byte(sample + "machine: { callers: [{ name: orrery }] }\n")); err == nil {
+		t.Fatal("a caller with no token is refused")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "deploy-token"), []byte("test-token-1111111111111111111111111111\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Parse([]byte(sample + "machine: { callers: [{ name: orrery, token: \"${TEST_CALLER_TOKEN}\" }, { name: deploy, token_file: deploy-token }] }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := c.Machine.Tokens(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(tokens["orrery"]) != "test-token-0000000000000000000000000000" || string(tokens["deploy"]) != "test-token-1111111111111111111111111111" {
+		t.Fatalf("tokens %q", tokens)
+	}
+	t.Setenv("TEST_CALLER_TOKEN", "short")
+	c, _ = Parse([]byte(sample + "machine: { callers: [{ name: orrery, token: \"${TEST_CALLER_TOKEN}\" }] }\n"))
+	if _, err := c.Machine.Tokens(dir); err == nil {
+		t.Fatal("a short token is refused")
+	}
+	c, _ = Parse([]byte(sample + "machine: { callers: [{ name: orrery, token_file: deploy-token }, { name: deploy, token_file: deploy-token }] }\n"))
+	if _, err := c.Machine.Tokens(dir); err == nil || !strings.Contains(err.Error(), "share a token") {
+		t.Fatalf("a shared token: %v", err)
+	}
+}
+
+// The machine door is :8081 unless set; listen.health is its old name.
+func TestMachineDoorAddress(t *testing.T) {
+	t.Setenv("TEST_ORRERY_TOKEN", "tok")
+	c, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Listen.Machine != ":8081" {
+		t.Fatalf("machine %q", c.Listen.Machine)
+	}
+	c, err = Parse([]byte(sample + "listen: { health: \":9091\" }\n"))
+	if err != nil || c.Listen.Machine != ":9091" {
+		t.Fatalf("the old name sets the machine door: %v %q", err, c.Listen.Machine)
+	}
+	if _, err := Parse([]byte(sample + "listen: { health: \":9091\", machine: \":9092\" }\n")); err == nil {
+		t.Fatal("two addresses for one door are refused")
 	}
 }

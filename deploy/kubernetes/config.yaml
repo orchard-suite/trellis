@@ -58,7 +58,13 @@ sources:
   #   token: ${ORRERY_TOKEN}
   - type: waivers
     file: /etc/trellis/config/waivers.yaml
-# The judge of one change, on the control port (POST /v1/judge): the
+# Who may call the machine door (port 8081): the judge's callers, each
+# with a token from the Secret trellis-secrets, or a token_file the estate
+# mounts. A token is never text in this file.
+machine:
+  callers:
+    - { name: orrery, token: "${TRELLIS_ORRERY_TOKEN}" }
+# The judge of one change, on the machine door (POST /v1/judge): the
 # built-in base gate pack and the estate's gate packs in packs.dir. A fence
 # sends a change to people, so it needs someone to ask when no rule names
 # anyone.

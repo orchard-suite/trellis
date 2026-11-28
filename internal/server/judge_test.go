@@ -27,8 +27,19 @@ const goodStatement = `{"statement": {
 
 func (h *harness) judge(body string) *httptest.ResponseRecorder {
 	h.t.Helper()
+	return h.judgeAs("Bearer "+orreryToken, body)
+}
+
+// judgeAs posts to the machine door with an Authorization header, or none
+// when it is empty.
+func (h *harness) judgeAs(auth, body string) *httptest.ResponseRecorder {
+	h.t.Helper()
 	rec := httptest.NewRecorder()
-	h.control.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/judge", strings.NewReader(body)))
+	req := httptest.NewRequest(http.MethodPost, "/v1/judge", strings.NewReader(body))
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	h.machine.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -48,7 +59,7 @@ func withJudge(t *testing.T) *harness {
 	return h
 }
 
-// The control port answers a route in the wire shape the runner reads.
+// The machine door answers a route in the wire shape the runner reads.
 func TestJudgeAnswersARoute(t *testing.T) {
 	h := withJudge(t)
 	rec := h.judge(goodStatement)
@@ -106,15 +117,50 @@ func TestJudgeRefusals(t *testing.T) {
 	}
 }
 
-// The judge is on the control port alone: the health port and the session
-// port have no such route.
-func TestJudgeIsOnTheControlPortAlone(t *testing.T) {
+// The machine door admits a caller's bearer token alone, compared with
+// every caller's: no token, a wrong one, another scheme, or an identity
+// header is 401, and the probes need none.
+func TestTheMachineDoorTakesTokensAlone(t *testing.T) {
 	h := withJudge(t)
-	for name, handler := range map[string]http.Handler{"health": h.health, "session": h.session} {
+	for name, auth := range map[string]string{
+		"no token":     "",
+		"a wrong one":  "Bearer test-token-1111111111111111111111111111",
+		"a prefix":     "Bearer " + orreryToken[:20],
+		"basic":        "Basic " + orreryToken,
+		"empty bearer": "Bearer ",
+	} {
+		rec := h.judgeAs(auth, goodStatement)
+		if rec.Code != http.StatusUnauthorized || rec.Header().Get("WWW-Authenticate") == "" || !strings.Contains(rec.Body.String(), "unauthorized") {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/judge", strings.NewReader(goodStatement))
+	req.Header.Set("X-Forwarded-Email", "ada@example.com")
+	req.Header.Set("X-Forwarded-Groups", "Viewer")
+	h.machine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("an identity header proves nothing on the machine door: %d", rec.Code)
+	}
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := httptest.NewRecorder()
+		h.machine.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code == http.StatusUnauthorized {
+			t.Errorf("the probe %s needs no token", path)
+		}
+	}
+}
+
+// The judge is on the machine door alone: the control port and the session
+// port have no such route.
+func TestJudgeIsOnTheMachineDoorAlone(t *testing.T) {
+	h := withJudge(t)
+	for name, handler := range map[string]http.Handler{"control": h.control, "session": h.session} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/v1/judge", strings.NewReader(goodStatement))
 		req.Header.Set("X-Forwarded-Email", "ada@example.com")
 		req.Header.Set("X-Forwarded-Groups", "Viewer")
+		req.Header.Set("Authorization", "Bearer "+orreryToken)
 		handler.ServeHTTP(rec, req)
 		if rec.Code == http.StatusOK {
 			t.Errorf("the %s port judged a change", name)

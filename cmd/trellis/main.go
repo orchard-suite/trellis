@@ -32,10 +32,12 @@ const usage = `trellis: one judge over an estate's standards.
         asks the running board for a pass now, on its control port, and
         waits for it and its sends; exits 1 when a source or a sink failed.
         In a cluster: kubectl exec deploy/trellis -- /app/trellis refresh
-  trellis judge [-control 127.0.0.1:8082] [-timeout 1m] [statement.json]
+  trellis judge [-machine 127.0.0.1:8081] [-token-file file] [-timeout 1m]
+                [statement.json]
         hands one change statement, from the file or stdin, to the running
-        board's judge on its control port and prints the answer: the route,
-        its reasons, and each draft's. Exits 1 when the statement is refused.
+        board's judge on its machine door, with a caller's token from
+        $TRELLIS_TOKEN or -token-file, and prints the answer: the route, its
+        reasons, and each draft's. Exits 1 when the statement is refused.
   trellis replay [-config file] -pack id [-packs-dir drafts/] [-since 30d]
                  [-until time] [-catalog=false] [-json]
         judges a gate pack over the past changes Annals keeps, joined to what

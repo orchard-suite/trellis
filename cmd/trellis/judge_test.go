@@ -18,6 +18,7 @@ import (
 func TestTheExampleEstateHasAJudge(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "test-token")
 	t.Setenv("FINDINGS_WEBHOOK_URL", "https://hooks.example.org/findings")
+	t.Setenv("TRELLIS_ORRERY_TOKEN", "test-token-0000000000000000000000000000")
 	cfg, err := config.Load("../../deploy/kubernetes/config.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -35,13 +36,14 @@ func TestTheExampleEstateHasAJudge(t *testing.T) {
 	}
 }
 
-// trellis judge posts the statement as it was written, under statement.
+// trellis judge posts the statement as it was written, under statement,
+// with the caller's token.
 func TestJudgePostsTheStatementAsWritten(t *testing.T) {
 	var got struct {
 		Statement change.Statement `json:"statement"`
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/judge" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/judge" || r.Header.Get("Authorization") != "Bearer test-token" {
 			http.NotFound(w, r)
 			return
 		}
@@ -50,7 +52,7 @@ func TestJudgePostsTheStatementAsWritten(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":"unknown_kind","reason":"effects[0].kind \"teleports\" is not a registered effect kind"}`)
 	}))
 	defer srv.Close()
-	status, body, err := askJudge(t.Context(), srv.Client(), srv.URL+"/v1/judge", []byte(` {"key":"run-1001","applier":"hub"}
+	status, body, err := askJudge(t.Context(), srv.Client(), srv.URL+"/v1/judge", "test-token", []byte(` {"key":"run-1001","applier":"hub"}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +63,7 @@ func TestJudgePostsTheStatementAsWritten(t *testing.T) {
 	if status != http.StatusBadRequest || len(body) == 0 {
 		t.Fatalf("%d %s", status, body)
 	}
-	if _, _, err := askJudge(t.Context(), srv.Client(), srv.URL+"/v1/judge", []byte("not json")); err == nil {
+	if _, _, err := askJudge(t.Context(), srv.Client(), srv.URL+"/v1/judge", "test-token", []byte("not json")); err == nil {
 		t.Fatal("a statement that is not JSON is refused before it is sent")
 	}
 }
