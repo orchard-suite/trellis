@@ -175,7 +175,9 @@ never restate it.
 Agents push to main.
 
 Commit on `main` and land with `make land` (`make land BRANCH=<branch>` from
-a worktree): it runs `make check`, then `release-damnit land`. The repository
+a worktree): it runs `release-damnit land`, which runs the config's check
+(`make check`) on exactly what lands and signs a landing proof that the
+release verifies. The repository
 is public, so CI runs the same check on GitHub's hosted runners
 (`test.yml`), on every pull request and before every release. The release
 then versions every `feat` and `fix`, tags it, and builds, signs, and attests
@@ -189,7 +191,8 @@ up the new tag its own way. Never edit `VERSION`, the manifest, or
 make check
 ```
 
-Run it before every commit; `make land` runs it again, and so does CI.
+Run it before every commit; `make land` runs it again on what lands, and so
+does CI.
 It needs Go (see `go.mod`) and git, and it
 judges this checkout with the build and interfaces packs. To prove a change
 against the real estate, run one pass with `trellis once -config <file>`,

@@ -40,6 +40,8 @@ run: build
 once: build
 	TUF_ROOT=$${TUF_ROOT:-/tmp/trellis-tuf} ./dist/trellis once -config $(CONFIG)
 
-# Run the check, then land the commits on main.
-land: check
+# Lands main: release-damnit land runs the config's check (make check) on
+# exactly what lands and signs its proof, which the release verifies. From a
+# worktree: make land BRANCH=<branch>.
+land:
 	release-damnit land $(BRANCH)
