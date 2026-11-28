@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.4.0](https://github.com/orchard-suite/trellis/compare/v6.3.0...v6.4.0) (2026-11-28)
+
+### Features
+
+* **trellis:** replay the unknown parts annals keeps ([09b35c5](https://github.com/orchard-suite/trellis/commit/09b35c54884e3b7cf7436ab1003e2756145c460c))
+
 ## [6.3.0](https://github.com/orchard-suite/trellis/compare/v6.2.0...v6.3.0) (2026-11-28)
 
 ### Features
