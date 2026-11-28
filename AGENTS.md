@@ -10,6 +10,11 @@ This repository is public and estate-neutral. Every name in a test, an
 example, or a doc comes from the fixture world:
 https://github.com/orchard-suite/hedge/blob/main/docs/fixtures.md.
 
+Decision records are the registry `TRL` in a Vantage hub, cited as `TRL-5001`.
+`vantage.yaml` names the registry; each estate maps this repository to its
+hub in its own Vantage settings. Code, comments, and docs cite a record and
+never restate it.
+
 ## Shape
 
 - `cmd/trellis` is the one binary. `main.go` is the commands, `board.go`
@@ -92,7 +97,7 @@ https://github.com/orchard-suite/hedge/blob/main/docs/fixtures.md.
   bearer tokens only, never an identity header, and serves the probes with
   no token and `POST /v1/judge` to the callers `machine.callers` names,
   each token compared in constant time; the control port, where `trellis
-  refresh` asks for a pass, listens on loopback only (ADR-2001). Decision records are in `docs/decisions/`. `internal/web` is
+  refresh` asks for a pass, listens on loopback only (TRL-2001). `internal/web` is
   the page: plain ES modules, no build step; kinds and pack titles come from
   the board's JSON. The server serves assets under `/static/<release>/`, so
   import modules by relative path and never hard-code `/static/`.
@@ -158,7 +163,7 @@ https://github.com/orchard-suite/hedge/blob/main/docs/fixtures.md.
   machine door `/v1` route without a caller's token, never log a token,
   never take a token as text in the settings, and never add a route
   to the session port that skips the gate, or let the control port listen
-  beyond loopback (ADR-2001). The one exception is the four
+  beyond loopback (TRL-2001). The one exception is the four
   install files in `internal/web/app` (the icons and the manifest), which a
   device fetches without a session; they carry nothing about the estate.
 - Logs are JSON lines on stdout. Log both branches of a decision about who

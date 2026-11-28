@@ -1,0 +1,4 @@
+# Where this repository's decision records live. It names no hub and no
+# workspace: each estate maps this repository to its hub and workspace in
+# its own Vantage settings.
+decisions: TRL
