@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.3.0](https://github.com/orchard-suite/trellis/compare/v6.2.0...v6.3.0) (2026-11-28)
+
+### Features
+
+* **trellis:** judge on the machine door by token ([4bb4563](https://github.com/orchard-suite/trellis/commit/4bb4563320929836d581323266d1455adb7a71cc))
+
 ## [6.2.0](https://github.com/orchard-suite/trellis/compare/v6.1.1...v6.2.0) (2026-11-28)
 
 ### Features
