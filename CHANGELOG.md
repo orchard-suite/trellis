@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.2.0](https://github.com/orchard-suite/trellis/compare/v6.1.1...v6.2.0) (2026-11-28)
+
+### Features
+
+* **trellis:** judge changes, read proof, replay ([7da5e8e](https://github.com/orchard-suite/trellis/commit/7da5e8e8815974d28aa7ee6539712e287ff28cef))
+
 ## [6.1.1](https://github.com/orchard-suite/trellis/compare/v6.1.0...v6.1.1) (2026-11-25)
 
 ### Bug Fixes
