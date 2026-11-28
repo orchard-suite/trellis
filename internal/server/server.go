@@ -3,8 +3,9 @@
 //   - Session: the board, its JSON, and the browser telemetry relay. Trusts
 //     the sign-in proxy's headers, so only that proxy may reach it.
 //   - Health: /healthz and /readyz for the kubelet. Nothing else.
-//   - Control: a pass on demand for trellis refresh. It listens on loopback
-//     only, so whoever may exec into the pod may ask, and nobody else.
+//   - Control: a pass on demand for trellis refresh, and the judge of one
+//     change for trellis judge. It listens on loopback only, so whoever may
+//     exec into the pod may ask, and nobody else.
 package server
 
 import (
@@ -19,11 +20,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orchard-suite/platformkit/v3/change"
+
 	"github.com/orchard-suite/trellis/internal/board"
 	"github.com/orchard-suite/trellis/internal/door"
 	"github.com/orchard-suite/trellis/internal/estate"
+	"github.com/orchard-suite/trellis/internal/gate"
 	"github.com/orchard-suite/trellis/internal/history"
 	"github.com/orchard-suite/trellis/internal/judge"
+	"github.com/orchard-suite/trellis/internal/meter"
 	"github.com/orchard-suite/trellis/internal/obs"
 	"github.com/orchard-suite/trellis/internal/pack"
 	"github.com/orchard-suite/trellis/internal/sources"
@@ -50,6 +55,8 @@ type Server struct {
 	origin  string
 	check   Check
 	history History
+	judge   *gate.Judge
+	metrics *meter.Metrics
 	// index is the page with its asset URLs under /static/<release>/, so a
 	// browser never pairs a new page with an old script.
 	index []byte
@@ -351,11 +358,86 @@ func (s *Server) refreshNow(w http.ResponseWriter, r *http.Request) {
 }
 
 // Control is the operator's port: POST /v1/refresh runs a pass and answers
-// when it and its sends are done.
+// when it and its sends are done, and POST /v1/judge routes one change.
 func (s *Server) Control() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/refresh", s.refreshWait)
+	mux.HandleFunc("POST /v1/judge", s.judgeNow)
 	return obs.Handler(mux, "control")
+}
+
+// UseJudge turns on POST /v1/judge with the judge, counting each answer in
+// metrics. Without it the route answers that the judge is off.
+func (s *Server) UseJudge(j *gate.Judge, metrics *meter.Metrics) {
+	s.judge, s.metrics = j, metrics
+}
+
+// MaxStatement is the most a judge request may hold: a statement at the
+// kit's limits on things, effects, and unknown parts fits well inside it.
+const MaxStatement = 8 << 20
+
+// JudgeRequest is what POST /v1/judge takes.
+type JudgeRequest struct {
+	Statement *change.Statement `json:"statement"`
+}
+
+// JudgeError is what POST /v1/judge answers when it gives no route: a code
+// a caller can act on, and the words.
+type JudgeError struct {
+	Error  string `json:"error"`
+	Reason string `json:"reason"`
+}
+
+// judgeNow answers the route for one statement: 200 with the answer, 400
+// for a statement the kit's validator refuses, 503 when the judge is off,
+// and 500 when it could not answer. A caller sends a change to people on
+// anything but 200.
+func (s *Server) judgeNow(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	started := time.Now()
+	refuse := func(status int, code, reason string) {
+		outcome := "refused"
+		if status >= 500 {
+			outcome = "failed"
+		}
+		s.metrics.Judged(ctx, outcome, time.Since(started))
+		s.log.WarnContext(ctx, "change not judged", "status", status, "error", code, "reason", reason)
+		writeJSON(w, status, JudgeError{Error: code, Reason: reason})
+	}
+	if s.judge == nil {
+		refuse(http.StatusServiceUnavailable, "judge_off", "this board has no gate settings, so it judges no change")
+		return
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxStatement))
+	dec.DisallowUnknownFields()
+	var req JudgeRequest
+	if err := dec.Decode(&req); err != nil {
+		refuse(http.StatusBadRequest, "bad_json", "the body is not a judge request: "+err.Error())
+		return
+	}
+	if req.Statement == nil {
+		refuse(http.StatusBadRequest, "missing_statement", "the body names no statement")
+		return
+	}
+	if err := req.Statement.Validate(s.judge.Kinds()); err != nil {
+		code := change.Reason(err)
+		if code == "" {
+			code = "bad_statement"
+		}
+		refuse(http.StatusBadRequest, code, err.Error())
+		return
+	}
+	ans, err := s.judge.Judge(ctx, req.Statement)
+	if err != nil {
+		s.log.ErrorContext(ctx, "the judge could not answer", "key", req.Statement.Key, "error", err)
+		refuse(http.StatusInternalServerError, "judge_failed", err.Error())
+		return
+	}
+	took := time.Since(started)
+	s.metrics.Judged(ctx, ans.Route.To, took)
+	digest, _ := req.Statement.Digest()
+	s.log.InfoContext(ctx, "change judged", "key", req.Statement.Key, "digest", digest, "route", ans.Route.To, "reasons", len(ans.Reasons), "drafts", len(ans.Drafts), "effects", len(req.Statement.Effects), "took", took.Round(time.Microsecond).String())
+	writeJSON(w, http.StatusOK, ans)
 }
 
 // Pass is what the control port's POST /v1/refresh answers: how the pass

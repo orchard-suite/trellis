@@ -11,3 +11,29 @@ rules:
     fail: { azure: { tags: *prod, publicAccess: true } }
     pass: { azure: { tags: *prod, publicAccess: false } }
     nodata: { azure: { tags: *prod } }
+  # The gate pack's rules: each case is the facts the judge builds from a
+  # statement, for an effect or for the change.
+  effect.grants-access:
+    fail: { effect: { kind: grants, family: exposure, subject: { blueprint: app, key: beacon }, size: 3 } }
+    pass: { effect: { kind: grants, family: exposure, subject: { blueprint: app, key: beacon }, size: 0 } }
+    nodata: { effect: { kind: grants, family: exposure, subject: { blueprint: app, key: beacon } } }
+  effect.loses-for-good:
+    fail: { effect: { kind: loses, family: exposure, subject: { blueprint: database, key: db-a }, undo: "no" } }
+    pass: { effect: { kind: loses, family: exposure, subject: { blueprint: database, key: db-a }, undo: "yes" } }
+    nodata: { effect: { kind: loses, family: exposure, subject: { blueprint: database, key: db-a } } }
+  effect.costs-much:
+    fail: { effect: { kind: costs, family: exposure, subject: { blueprint: app, key: comet }, size: 90000 } }
+    pass: { effect: { kind: costs, family: exposure, subject: { blueprint: app, key: comet }, size: 1200 } }
+    nodata: { effect: { kind: costs, family: exposure, subject: { blueprint: app, key: comet } } }
+  effect.disrupts-many:
+    fail: { effect: { kind: stops, family: disruption, subject: { blueprint: app, key: atlas-lite }, leaning: 40 } }
+    pass: { effect: { kind: stops, family: disruption, subject: { blueprint: app, key: atlas-lite }, leaning: 3 } }
+    nodata: { effect: { kind: stops, family: disruption, subject: { blueprint: app, key: atlas-lite }, leaning: null } }
+  effect.sends-outside:
+    fail: { effect: { kind: sends, family: exposure, subject: { blueprint: app, key: ember }, size: 1200 } }
+    pass: { effect: { kind: sends, family: exposure, subject: { blueprint: app, key: ember }, size: 0 } }
+    nodata: { effect: { kind: sends, family: exposure, subject: { blueprint: app, key: ember } } }
+  change.agent-alone:
+    fail: { change: { actor: { kind: agent, id: build-box, on_behalf_of: "" } } }
+    pass: { change: { actor: { kind: agent, id: build-box, on_behalf_of: ada@example.com } } }
+    nodata: { change: {} }

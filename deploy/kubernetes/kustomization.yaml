@@ -20,6 +20,7 @@ configMapGenerator:
   - name: trellis-packs
     files:
       - packs/example.yaml
+      - packs/example-gate.yaml
       - packs/tuning.yaml
 images:
   - name: ghcr.io/orchard-suite/trellis

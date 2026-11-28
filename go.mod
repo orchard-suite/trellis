@@ -6,6 +6,8 @@ require (
 	cel.dev/cel-go v0.32.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/jackc/pgx/v5 v5.12.0
+	github.com/orchard-suite/platformkit/v3 v3.7.1
+	github.com/prometheus/prometheus v0.316.0
 	github.com/sigstore/cosign/v3 v3.1.4
 	github.com/sigstore/sigstore-go v1.4.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
@@ -87,7 +89,6 @@ require (
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.72.1 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
-	github.com/prometheus/prometheus v0.316.0 // indirect
 	github.com/sassoftware/relic/v8 v8.2.0 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.11.1 // indirect
 	github.com/shibumi/go-pathspec v1.3.0 // indirect

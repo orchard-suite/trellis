@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orchard-suite/platformkit/v3/change"
 	"gopkg.in/yaml.v3"
 
 	"github.com/orchard-suite/trellis/internal/door"
@@ -64,7 +65,10 @@ type Config struct {
 		Orrery  *Orrery  `yaml:"orrery"`
 		Webhook *Webhook `yaml:"webhook"`
 	} `yaml:"sinks"`
-	History          *History `yaml:"history"`
+	History *History `yaml:"history"`
+	// Gate turns the judge on: the call on the control port that routes
+	// one change handed in.
+	Gate             *Gate `yaml:"gate"`
 	BrowserTelemetry struct {
 		URL string `yaml:"url"`
 		Key string `yaml:"key"`
@@ -93,6 +97,33 @@ type Orrery struct {
 	Write orrery.Write `yaml:"write"`
 	// Scorecards, when set, puts one hub scorecard per tiered pack.
 	Scorecards *orrery.Scorecards `yaml:"scorecards"`
+}
+
+// Gate is the judge of changes handed in: which of the estate's gate packs
+// in packs.dir count beside the built-in base pack, who decides when no
+// rule names anyone, where the watch's proof is read, and which kind the
+// catalog's safe paths are mapped as.
+type Gate struct {
+	// Packs names the estate's gate packs in packs.dir, in order. A draft
+	// pack among them answers as a draft and never counts.
+	Packs []string `yaml:"packs"`
+	// DefaultApprovers decide when a fence sends a change to people and no
+	// rule named anyone, in the runner's own terms for approvers: the
+	// values of a field, on the entity or along a path from it.
+	DefaultApprovers []change.Grant `yaml:"default_approvers"`
+	// Annals is where proof is read, by key. Without it no disruption is
+	// proven past claimed.
+	Annals *Annals `yaml:"annals"`
+	// SafePaths is the kind the catalog source maps the hub's safe paths
+	// as, such as safe_path from the safe_paths include; none when empty.
+	SafePaths string `yaml:"safe_paths"`
+}
+
+// Annals is the record the judge reads proof and replays from: its API
+// port, and a token it issued, at the reader level.
+type Annals struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
 }
 
 // History is the PostgreSQL database trellis keeps its past in.
@@ -258,6 +289,17 @@ func Parse(raw []byte) (*Config, error) {
 		}
 		if h.RetentionDays < 30 {
 			return nil, fmt.Errorf("config: history retention_days must be at least 30")
+		}
+	}
+	if g := c.Gate; g != nil {
+		if len(g.DefaultApprovers) == 0 {
+			return nil, fmt.Errorf("config: gate.default_approvers: the judge will not start without them, since a fence sends a change to people and someone must be asked; name at least one grant, such as { field: team, values: [platform] }")
+		}
+		if err := change.ValidateRoute("gate.default_approvers", change.Route{To: change.RoutePeople, Grants: g.DefaultApprovers, Quorum: 1}, nil); err != nil {
+			return nil, fmt.Errorf("config: %w", err)
+		}
+		if a := g.Annals; a != nil && (a.URL == "" || a.Token == "") {
+			return nil, fmt.Errorf("config: gate.annals needs url and token")
 		}
 	}
 	return &c, nil

@@ -8,6 +8,7 @@ package pack
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"cel.dev/cel-go/cel"
+	"github.com/orchard-suite/platformkit/v3/change"
 	"gopkg.in/yaml.v3"
 
 	"github.com/orchard-suite/trellis/internal/estate"
@@ -34,12 +36,32 @@ const (
 )
 
 // Stage is where a rule runs: on the board against the live estate, in
-// check against a repository in its pipeline, or both.
+// check against a repository in its pipeline, or both; or, for a rule of a
+// gate pack, in the gate, over one change a caller hands in, and nowhere
+// else.
 type Stage string
 
 const (
 	Board Stage = "board"
 	Check Stage = "check"
+	Gate  Stage = "gate"
+)
+
+// GateFamily is the family of a gate pack: its rules judge one change
+// handed in, never the estate, and answer a route. A gate pack is never on
+// the board, and the board's packs are never in the gate.
+const GateFamily = "gate"
+
+// BaseGate is the built-in gate pack. It always counts, and no estate pack
+// may replace it.
+const BaseGate = "gate"
+
+// The kinds of subject a gate rule judges: the change as a whole, each of
+// its effects, and each part its writer could not name.
+const (
+	GateChange  = "change"
+	GateEffect  = "effect"
+	GateUnknown = "unknown"
 )
 
 // Pack is one rulebook.
@@ -48,8 +70,9 @@ type Pack struct {
 	Title   string `yaml:"title" json:"title"`
 	About   string `yaml:"about" json:"about"`
 	Version string `yaml:"version" json:"version"`
-	// Family is the kind of standard: security, or platform. The catalog
-	// keeps each family's findings in a list of its own.
+	// Family is the kind of standard: security, or platform, whose
+	// findings the catalog keeps in a list of each; or gate, a pack that
+	// routes changes.
 	Family string `yaml:"family" json:"family"`
 	State  State  `yaml:"status" json:"status"`
 	// Params are the pack's defaults; an estate overrides them.
@@ -64,11 +87,26 @@ type Pack struct {
 	// or a lower one fails or lacks data.
 	Tiers []string `yaml:"tiers" json:"tiers,omitempty"`
 	Rules []*Rule  `yaml:"rules" json:"-"`
+	// Kinds are the effect kinds a gate pack adds to the suite's base set,
+	// each as the platform kit reads a kind: name, family, means, unit,
+	// and watch.
+	Kinds []map[string]any `yaml:"kinds" json:"-"`
 	// Source is the file the pack came from, or "built in".
 	Source string `yaml:"-" json:"source"`
 
 	scopes map[string]cel.Program
+	kinds  []change.Kind
 }
+
+// Gate says the pack routes changes.
+func (p *Pack) Gate() bool { return p.Family == GateFamily }
+
+// EffectKinds are the effect kinds the pack adds.
+func (p *Pack) EffectKinds() []change.Kind { return p.kinds }
+
+// Ref names the pack and its version, as a judge names the pack that
+// answered.
+func (p *Pack) Ref() string { return p.ID + "@" + p.Version }
 
 // Condition is a CEL test and the words a person reads when it holds:
 // Because as written, or Explain, a CEL string, when the words come from
@@ -125,8 +163,11 @@ type Rule struct {
 	// Evidence is an optional CEL list of {source, query, got}.
 	Evidence string `yaml:"evidence" json:"evidence,omitempty"`
 	Fix      string `yaml:"fix" json:"fix"`
-	// Stages default to both.
+	// Stages default to both, and a gate pack's rules to the gate alone.
 	Stages []Stage `yaml:"stages" json:"stages,omitempty"`
+	// Route is who a gate rule sends a change to when it fails, or has no
+	// data: no data is never a pass.
+	Route *Route `yaml:"route" json:"route,omitempty"`
 
 	Pack string `yaml:"-" json:"pack"`
 	// Reads are the facts the rule's expressions read, by name.
@@ -134,6 +175,20 @@ type Rule struct {
 
 	scope                   cel.Program
 	check, detail, evidence cel.Program
+}
+
+// Route is the people a gate rule asks: who may decide, in the runner's
+// own terms for approvers, how many must agree, and when. By and Start are
+// CEL over what the rule sees that give a timestamp, such as
+// now + duration("4h"). A route with no grants asks the estate's default
+// approvers.
+type Route struct {
+	Grants []change.Grant `yaml:"grants" json:"grants,omitempty"`
+	Quorum int            `yaml:"quorum" json:"quorum,omitempty"`
+	By     string         `yaml:"by" json:"by,omitempty"`
+	Start  string         `yaml:"start" json:"start,omitempty"`
+
+	by, start cel.Program
 }
 
 // RunsIn says whether the rule runs in stage.
@@ -209,8 +264,14 @@ func (p *Pack) Compile() error {
 	if err := p.compileScopes(nil); err != nil {
 		return err
 	}
+	if err := p.compileKinds(); err != nil {
+		return err
+	}
 	for _, r := range p.Rules {
 		r.Pack = p.ID
+		if p.Gate() && len(r.Stages) == 0 {
+			r.Stages = []Stage{Gate}
+		}
 		if p.State == Draft {
 			r.State = Draft
 		}
@@ -230,12 +291,16 @@ func (p *Pack) validate() error {
 		return fmt.Errorf("pack %q is not a lowercase id", p.ID)
 	case p.Title == "" || p.Version == "":
 		return fmt.Errorf("pack %s needs a title and a version", p.ID)
-	case p.Family != "security" && p.Family != "platform":
-		return fmt.Errorf("pack %s: family %q is not security or platform", p.ID, p.Family)
+	case p.Family != "security" && p.Family != "platform" && p.Family != GateFamily:
+		return fmt.Errorf("pack %s: family %q is not security, platform, or gate", p.ID, p.Family)
 	case p.State != Active && p.State != Draft:
 		return fmt.Errorf("pack %s: status %q is not active or draft", p.ID, p.State)
 	case len(p.Rules) == 0:
 		return fmt.Errorf("pack %s has no rules", p.ID)
+	case p.Gate() && len(p.Tiers) > 0:
+		return fmt.Errorf("pack %s: a gate pack answers routes, so it has no tiers", p.ID)
+	case !p.Gate() && len(p.Kinds) > 0:
+		return fmt.Errorf("pack %s: only a gate pack adds effect kinds", p.ID)
 	}
 	for name := range p.Scopes {
 		if !kindRE.MatchString(name) {
@@ -251,7 +316,7 @@ func (p *Pack) validate() error {
 			return fmt.Errorf("rule %s is listed twice", r.ID)
 		case !kindRE.MatchString(r.Kind):
 			return fmt.Errorf("rule %s: kind %q is not a lowercase name", r.ID, r.Kind)
-		case !r.Severity.Valid():
+		case !r.Severity.Valid() && !(p.Gate() && r.Severity == ""):
 			return fmt.Errorf("rule %s: severity %q is not critical, high, medium, or low", r.ID, r.Severity)
 		case r.Title == "" || r.Fix == "" || r.Check == "" || r.Detail == "":
 			return fmt.Errorf("rule %s needs a title, a check, a detail, and a fix", r.ID)
@@ -281,12 +346,77 @@ func (p *Pack) validate() error {
 				return fmt.Errorf("rule %s: need %q is not a fact path", r.ID, path)
 			}
 		}
+		if err := p.validateStage(r); err != nil {
+			return err
+		}
+		seen[r.ID] = true
+	}
+	return nil
+}
+
+// validateStage holds a rule to its pack's side: a gate pack's rules run in
+// the gate alone, judge a change, an effect, or an unknown part, and route;
+// every other pack's run on the board or in check, and never route.
+func (p *Pack) validateStage(r *Rule) error {
+	if !p.Gate() {
 		for _, s := range r.Stages {
 			if s != Board && s != Check {
 				return fmt.Errorf("rule %s: stage %q is not board or check", r.ID, s)
 			}
 		}
-		seen[r.ID] = true
+		if r.Route != nil {
+			return fmt.Errorf("rule %s: only a gate pack's rules route", r.ID)
+		}
+		return nil
+	}
+	for _, s := range r.Stages {
+		if s != Gate {
+			return fmt.Errorf("rule %s: a gate pack's rules run in the gate alone, not %q", r.ID, s)
+		}
+	}
+	if r.Kind != GateChange && r.Kind != GateEffect && r.Kind != GateUnknown {
+		return fmt.Errorf("rule %s: a gate rule judges a %s, an %s, or an %s, not %q", r.ID, GateChange, GateEffect, GateUnknown, r.Kind)
+	}
+	if r.Route == nil {
+		return fmt.Errorf("rule %s: a gate rule names its route", r.ID)
+	}
+	if r.Route.Quorum < 0 {
+		return fmt.Errorf("rule %s: route.quorum is never below zero", r.ID)
+	}
+	if len(r.Route.Grants) > 0 {
+		route := change.Route{To: change.RoutePeople, Grants: r.Route.Grants, Quorum: max(1, r.Route.Quorum)}
+		if err := change.ValidateRoute("rule "+r.ID+" route", route, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// compileKinds reads a gate pack's effect kinds as the platform kit reads a
+// kinds file, so a kind here is held to the same rules.
+func (p *Pack) compileKinds() error {
+	p.kinds = nil
+	reg := change.Base()
+	seen := map[string]bool{}
+	for i, raw := range p.Kinds {
+		b, err := json.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("pack %s kinds[%d]: %w", p.ID, i, err)
+		}
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.DisallowUnknownFields()
+		var k change.Kind
+		if err := dec.Decode(&k); err != nil {
+			return fmt.Errorf("pack %s kinds[%d]: %w", p.ID, i, err)
+		}
+		if seen[k.Name] {
+			return fmt.Errorf("pack %s names the effect kind %q twice", p.ID, k.Name)
+		}
+		seen[k.Name] = true
+		if err := reg.Add(k); err != nil {
+			return fmt.Errorf("pack %s: %w", p.ID, err)
+		}
+		p.kinds = append(p.kinds, k)
 	}
 	return nil
 }
@@ -350,6 +480,18 @@ func (r *Rule) compile(p *Pack) error {
 			return err
 		}
 	}
+	if rt := r.Route; rt != nil {
+		if rt.By != "" {
+			if err := compile(&rt.by, rt.By, "route.by"); err != nil {
+				return err
+			}
+		}
+		if rt.Start != "" {
+			if err := compile(&rt.start, rt.Start, "route.start"); err != nil {
+				return err
+			}
+		}
+	}
 	for _, c := range append(append([]*Condition{}, r.Unknown...), r.Skip...) {
 		if c.If == "" || (c.Because == "") == (c.Explain == "") {
 			return fmt.Errorf("a condition needs if, and one of because or explain")
@@ -399,9 +541,58 @@ type Tuning struct {
 
 // Load reads the built-in packs, then every .yaml in dir; a pack in dir
 // replaces a built-in one of the same id. on names the packs switched on, in
-// order; every other pack is left out. The folder's tuning, when it has
-// one, is laid over the packs switched on.
+// order; every other pack is left out. A gate pack is never one of them: it
+// judges changes handed in, not the estate (LoadGate). The folder's tuning,
+// when it has one, is laid over the packs switched on.
 func Load(builtin fs.FS, dir string, on []string) (*Set, error) {
+	all, err := ReadAll(builtin, dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(on) == 0 {
+		for id, p := range all {
+			if !p.Gate() {
+				on = append(on, id)
+			}
+		}
+		sort.Strings(on)
+	}
+	for _, id := range on {
+		if p, ok := all[id]; ok && p.Gate() {
+			return nil, fmt.Errorf("pack %s is a gate pack: it judges changes handed in, so name it in gate.packs", id)
+		}
+	}
+	return pick(all, dir, on, false)
+}
+
+// LoadGate reads the packs as Load does and switches on the gate's: the
+// built-in base gate pack first, which always counts, then the estate's
+// gate packs on names, in order. The folder's tuning is laid over them.
+func LoadGate(builtin fs.FS, dir string, on []string) (*Set, error) {
+	all, err := ReadAll(builtin, dir)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := all[BaseGate]; !ok {
+		return nil, fmt.Errorf("the built-in packs hold no base gate pack %s", BaseGate)
+	}
+	ids := []string{BaseGate}
+	for _, id := range on {
+		if id == BaseGate {
+			return nil, fmt.Errorf("gate.packs names %s, the base gate pack, which is always on", BaseGate)
+		}
+		if p, ok := all[id]; ok && !p.Gate() {
+			return nil, fmt.Errorf("pack %s is not a gate pack (family %s)", id, p.Family)
+		}
+		ids = append(ids, id)
+	}
+	return pick(all, dir, ids, true)
+}
+
+// ReadAll reads every built-in pack, then the estate's, by id, board and
+// gate packs alike. No estate pack replaces the base gate pack, so its
+// rules hold in every estate.
+func ReadAll(builtin fs.FS, dir string) (map[string]*Pack, error) {
 	all := map[string]*Pack{}
 	// Packs sit at the top of the folder; testdata and the like below it
 	// are not packs.
@@ -432,33 +623,38 @@ func Load(builtin fs.FS, dir string, on []string) (*Set, error) {
 	if err != nil {
 		return nil, err
 	}
-	if dir != "" {
-		entries, err := os.ReadDir(dir)
+	if dir == "" {
+		return all, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("packs: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !isYAML(e.Name()) || e.Name() == TuningFile {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("packs: %w", err)
+			return nil, err
 		}
-		for _, e := range entries {
-			if e.IsDir() || !isYAML(e.Name()) || e.Name() == TuningFile {
-				continue
-			}
-			path := filepath.Join(dir, e.Name())
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil, err
-			}
-			p, err := Parse(data, path)
-			if err != nil {
-				return nil, err
-			}
-			all[p.ID] = p
+		p, err := Parse(data, path)
+		if err != nil {
+			return nil, err
 		}
+		if p.ID == BaseGate {
+			return nil, fmt.Errorf("%s: no estate pack replaces the base gate pack %s", path, BaseGate)
+		}
+		all[p.ID] = p
 	}
-	if len(on) == 0 {
-		for id := range all {
-			on = append(on, id)
-		}
-		sort.Strings(on)
-	}
+	return all, nil
+}
+
+// pick makes the set of the packs on names, in order, with the folder's
+// tuning; gate says which side the set is, so tuning for the other side's
+// packs is left to it.
+func pick(all map[string]*Pack, dir string, on []string, gate bool) (*Set, error) {
 	set := &Set{}
 	rules := map[string]string{}
 	for _, id := range on {
@@ -480,15 +676,16 @@ func Load(builtin fs.FS, dir string, on []string) (*Set, error) {
 		set.Packs = append(set.Packs, p)
 	}
 	if dir != "" {
-		if err := set.tune(filepath.Join(dir, TuningFile)); err != nil {
+		if err := set.tune(filepath.Join(dir, TuningFile), all, gate); err != nil {
 			return nil, err
 		}
 	}
 	return set, nil
 }
 
-// tune reads the tuning file at path, when there is one.
-func (s *Set) tune(path string) error {
+// tune reads the tuning file at path, when there is one. Tuning for a pack
+// of the other side, gate or board, is that side's, and left out here.
+func (s *Set) tune(path string, all map[string]*Pack, gate bool) error {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -502,13 +699,28 @@ func (s *Set) tune(path string) error {
 	if err := dec.Decode(&t); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	for id := range t.Params {
+	other := func(id string) bool {
+		p, ok := all[id]
+		return ok && p.Gate() != gate
+	}
+	params := map[string]map[string]any{}
+	for id, v := range t.Params {
+		if other(id) {
+			continue
+		}
 		if _, ok := s.Pack(id); !ok {
 			return fmt.Errorf("%s: params for pack %q, which is not switched on", path, id)
 		}
+		params[id] = v
 	}
-	s.Params = t.Params
-	if err := s.Scope(t.Scopes); err != nil {
+	s.Params = params
+	scopes := map[string]map[string]string{}
+	for id, v := range t.Scopes {
+		if !other(id) {
+			scopes[id] = v
+		}
+	}
+	if err := s.Scope(scopes); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	return nil

@@ -30,7 +30,9 @@ Four positions set it apart from scorecards and policy engines:
 
 The same judge runs in three places with the same packs, so they cannot
 disagree: the board on a schedule, `trellis once` by hand, and `trellis
-check` in a repository's pipeline.
+check` in a repository's pipeline. The gate judges one change a runner
+hands in, with gate packs of its own, and answers who must look first
+([The judge](#the-judge)).
 
 | Command | What it does |
 |---|---|
@@ -38,6 +40,8 @@ check` in a repository's pipeline.
 | `trellis once -config config.yaml [-packs-dir drafts/]` | One pass, printed. `-packs-dir` tries packs on the real estate before they are switched on. |
 | `trellis check [-dir .] [-packs build,interfaces] [-fail-on high] [-waivers file]` | Judges a repository checkout: its tree, the APIs its `orrery.yaml` offers with what changed since the latest release tag, and, given a declaration and the stores, its telemetry. Exits 1 on a finding at or over `-fail-on`. |
 | `trellis refresh [-control 127.0.0.1:8082] [-timeout 20m]` | Asks the running board for a pass now, waits for it and its sends, and prints how each source read and each sink took it. Exits 1 when one failed. |
+| `trellis judge [-control 127.0.0.1:8082] [statement.json]` | Hands one change statement, from the file or stdin, to the running board's judge and prints the answer: the route, its reasons, and each draft's. Exits 1 when the statement is refused. |
+| `trellis replay -config config.yaml -pack id [-packs-dir drafts/] [-since 30d]` | Judges a gate pack over the past changes Annals keeps, joined to what each did, and prints how many it would have asked of people and how many it would have passed that then did harm. Exits 1 on a miss. |
 | `trellis test [-packs-dir packs]` | Holds an estate's packs to their fixtures before they are switched on: a failing, a passing, and a no-data case for every rule. |
 | `trellis schema` | The JSON Schema of a telemetry declaration. |
 
@@ -118,7 +122,7 @@ sources ──> estate ──> judge(packs) ──> evaluation ──> sinks, bo
 
 A pack file holds `pack`, `title`, `about`, `version`, `family`
 (`security` or `platform`, which sets the catalog list its findings go
-to), `status` (`active`, or `draft`: judged and shown, never counted,
+to, or `gate`, a pack that routes changes: [The judge](#the-judge)), `status` (`active`, or `draft`: judged and shown, never counted,
 written, or alerted on), `params` (defaults the estate overrides), `scopes` (named CEL filters a
 rule holds in), `tiers` (its levels, lowest first, such as `[baseline,
 hardened]`; every rule then names one), and `rules`.
@@ -520,7 +524,10 @@ A mapping of kind `waiver` makes waivers: its fields are `rule`, `subject`,
 `reason`, `owner`, `category`, `control`, `match`, `granted_at`,
 `expires_at`, and `review_at`.
 
-`include` adds the mappings of files, each a `mappings:` list: `standard` is
+`include` adds the mappings of files, each a `mappings:` list: `safe_paths` is
+the built-in [`safe_paths.yaml`](internal/sources/orrery/safe_paths.yaml), the
+hub's own safe paths (`orrery_safe_path`) as `safe_path` subjects for the
+judge; `standard` is
 the built-in [`standard.yaml`](internal/sources/orrery/standard.yaml) for a
 catalog on the blueprint standard, which gives the built-in packs their
 facts (`repo` with `last_push`, `runs` with the folders and the `owners`
@@ -628,6 +635,11 @@ sinks:
     write: { finding_security: sec_finding, finding_platform: plat_finding, verdict: plat_verdict, pack: plat_pack, pillar: plat_pillar }
     scorecards: { field: "trellis_{pack}_checks" }   # optional: a scorecard per tiered pack
 browser_telemetry: { url: "${FARO_URL}", key: "${FARO_API_KEY}" }
+gate:                        # the judge of one change: The judge, below
+  packs: [acme-gate]
+  default_approvers: [{ field: team, values: [platform] }]
+  annals: { url: "http://annals-api.annals:8081", token: "${ANNALS_TOKEN}" }
+  safe_paths: safe_path
 ```
 
 The estate's tuning sits beside its packs, so the board and every
@@ -653,9 +665,9 @@ let only that proxy reach it. The health port answers `/healthz` and
 `/readyz` and trusts nothing.
 
 The control port, `listen.control`, is `127.0.0.1:8082` unless set, and
-trellis refuses any address that is not loopback. It answers one route,
+trellis refuses any address that is not loopback. It answers two routes:
 `POST /v1/refresh`, which runs a pass and answers when the pass and its
-sends are done. Whoever may exec into the pod, or forward a port to it,
+sends are done, and `POST /v1/judge`, [the judge](#the-judge). Whoever may exec into the pod, or forward a port to it,
 may ask; nobody else can reach it. After a change the board should see
 now, such as a field added to a catalog blueprint, ask for a pass instead
 of restarting the board or waiting for the next one:
@@ -746,6 +758,183 @@ Each pass's events say what changed since the one before: a finding
 `opened`, `resolved`, `waived`, gone `overdue`, or `unknown` (it had no
 data, so nobody can say it was fixed), and a waiver `waiver_ending` or
 `waiver_ended`, each with its owner.
+
+## The judge
+
+The judge routes one change to a live thing before it runs. A runner, such
+as a hub's action, hands it a change statement, the platform kit's shape
+(the `change` package): who asks, what it touches, the digest of the exact
+artifact, where it applies, its predicted effects, and the parts its writer
+could not name. The judge answers a route: no one, so the change runs at
+once, or the people who must look first, with why. It is the same judge as
+the board's, with its own packs, and it is off the board: no gate rule is a
+finding, a count, or a catalog write.
+
+```
+POST /v1/judge                    on the control port
+{"statement": <change.Statement>}
+```
+
+| Answer | When |
+|---|---|
+| `200` `{"judge": {"name": "trellis", "version", "pack"}, "route", "reasons", "drafts"}` | The judge answered. |
+| `400` `{"error", "reason"}` | The kit's validator refused the statement, against the base effect kinds and every gate pack's; `error` is the kit's reason, such as `unknown_kind` or `bad_applier`. Also `bad_json` and `missing_statement`. |
+| `503` `{"error": "judge_off", ...}` | The settings have no `gate`. |
+| `500` `{"error": "judge_failed", ...}` | The answer would break the kit's rules for a route. |
+
+A runner sends the change to people on any answer but `200`. The `route`
+is `to` (`no_one` or `people`), and for people `grants` (who may decide,
+in the runner's own terms for approvers: the values of a field, on the
+entity or along a path from it), `quorum` (at least 1), `by` (when they
+decide by), and `start` (the earliest it may run). Each of `reasons`
+names an `effect` (its index), a `part` (the index of an unknown part), a
+`fence`, or a `rule`, with the `proof` the judge held for the effect. The
+route and its reasons always pass the kit's `ValidateRoute`. `pack` names
+the estate's gate packs that count, as `id@version`, comma separated, or
+the base pack when none does. `drafts` holds, for each gate pack that does
+not count yet, whole (`status: draft`) or in part (a rule drafted, or
+announced with `from`), what it would have answered: the base pack's
+counted rules and its own, as if it counted alone.
+
+`trellis judge` hands a statement to the running board, so it gives the
+very answer the runner gets:
+
+```bash
+kubectl -n trellis exec -i deploy/trellis -- /app/trellis judge < statement.json
+```
+
+### Gate packs
+
+A gate pack is a pack with `family: gate`, in `packs.dir` with the others
+and tuned in the same `tuning.yaml`; `gate.packs` names the ones the judge
+reads, and `packs.on` never names one. Its rules run in the gate stage
+alone. A gate rule judges a `change` (once), an `effect` (each one), or an
+`unknown` part (each one), needs no severity, has no tier, and names a
+route:
+
+```yaml
+- id: effect.grants-access
+  title: A change grants access
+  kind: effect
+  standard: human-access-only-through-project-role-groups-assigned-in-on
+  pillar: platform/security
+  skip: [{ if: effect.kind != "grants", because: the effect grants nothing }]
+  needs: { effect.size: the writer did not say how many principals it grants }
+  check: effect.size == 0
+  detail: 'plural(effect.size, "principal", "principals") + " gain access"'
+  fix: Grant access through a role group, or ask the platform team.
+  route:
+    grants: [{ field: team, values: [platform] }]   # empty: the default approvers
+    quorum: 1                                       # 1 unless set
+    by: now + duration("24h")                       # CEL that gives a timestamp
+    start: now + duration("1h")                     # CEL that gives a timestamp
+```
+
+A rule that passes, or does not apply, asks no one. One that fails, or has
+no data, asks the people its route names: no data is never a pass. Every
+rule's answer joins the strict way: any rule that asks people wins over no
+one, the grants join (one grant per path and field, each value once), the
+largest quorum stands, and the earliest `by` and the latest `start`. A
+gate pack's `kinds` adds the estate's own effect kinds in the kit's shape
+(`name`, `family`, `means`, `unit`, `watch`), and may give a base kind its
+own watch. `deploy/kubernetes/packs/example-gate.yaml` is an estate's gate
+pack with its fixtures.
+
+The built-in base pack, `gate`, always counts, and no estate pack replaces
+it. Its rule `effect.disruption-unproven` asks people for a disruption the
+watch has not proven past claimed. Beside the packs, the judge holds the
+fences, which no pack turns off:
+
+- `unknown`: an effect whose proof is unknown, and every part in the
+  statement's `unknown`, asks people.
+- `asker`: a route of no one for a change whose `applier` is `asker`, the
+  machine that asked, asks people.
+- `judge_down` is the runner's, for a judge that did not answer; the judge
+  never gives it.
+
+When a fence or a rule asks people and no rule named grants, the route
+asks `gate.default_approvers`.
+
+Every gate subject has `change`: the statement (`key`, `digest`,
+`writer`, `actor`, `things`, `artifact`, `applier`, `effects`, and
+`unknown`). An effect's adds `effect`: its `index`, `kind`, `family`,
+`unit`, `subject`, `path`, `size`, `undo`, `claim`, `proof` (`level`,
+`read`, `watched`, `clean`, `harm`, `blind`, `last_seen`, `error`),
+`safe_paths` (each `path`, `proven`, `proven_at`, `failed_at`), `safe`
+(its path is one the watch proved on the thing after it last did harm),
+`held` (the catalog holds the thing), and `leaning` (how many subjects on
+the board are linked to it, either way); `held`, `leaning`, and
+`safe_paths` are null until the board has read the catalog. An unknown
+part's adds `unknown`: `index`, `thing`, `part`, and `why`. `linked` holds
+the board's subjects for the thing an effect or a part names, by kind, and
+for a change every thing it touches.
+
+### Proof
+
+Before the rules run, each effect gets its proof. An exposure (`opens`,
+`grants`, `loses`, `costs`, or an estate kind of that family) is proven
+by the statement itself once the applier recomputes it, so it is
+`claimed` and never read. A disruption is read from Annals by key, never
+by a scan: `GET /v1/proof?kind=&blueprint=&path=`, each key once, 16 at
+a time. From its counts:
+
+| Level | When |
+|---|---|
+| `claimed` | No watch saw the key clean, or one saw it do harm, or the estate keeps no `gate.annals`. |
+| `rehearsed` | At least one clean watch, and no harm, or harm the thing's own safe path by the same path absorbs: proven after it last did harm. |
+| `measured` | `measured_after` clean watches (`params.gate.measured_after` in `tuning.yaml`, 5 unless set), on the same terms. |
+| `unknown` | Annals did not answer, or not within the limit. The `unknown` fence asks people. |
+
+The key read cannot tell which artifact a clean watch saw, so `rehearsed`
+means the key was seen clean, not this artifact. The hub keeps each
+thing's safe paths itself; the `orrery` source's `safe_paths` include maps
+them as `safe_path` subjects, which `gate.safe_paths` names.
+
+### Settings
+
+| Setting | What it does |
+|---|---|
+| `gate` | Turns the judge on. Without it `POST /v1/judge` answers `503`. |
+| `gate.packs` | The estate's gate packs in `packs.dir`, in order, beside the base pack. A draft among them only answers in `drafts`. At most 8. |
+| `gate.default_approvers` | Required. Who decides when a fence or a rule asks people and no rule named anyone: a list of grants, such as `[{ field: team, values: [platform] }]`. The judge does not start without them. |
+| `gate.annals` | `url` (the API port) and `token` (a reader token Annals issued): where proof is read and replays read past changes. Without it no disruption is proven past claimed. |
+| `gate.safe_paths` | The kind the catalog's safe paths are mapped as, `safe_path` with the `safe_paths` include. None when empty. |
+
+### Speed
+
+`BenchmarkJudge` (`go test ./internal/gate -run '^$' -bench BenchmarkJudge
+-benchtime 200x`) judges at the suite's scale target: a million catalog
+things in memory, statements with 1,000 effects and 1,000 things (the
+kit's limits) over every base kind and an estate's own, the base pack and
+the example gate pack, and every disruption's proof read from Annals over
+HTTP. Measured on 2026-11-27 on an Apple M4 Max: 13 ms a judgment, the
+slowest of 800 at 25 ms, of which the rules take 8 ms; the catalog's index
+of a million things builds in 0.9 s, once a pass. The judge waits at most
+1 s (`gate.Limit`) for proof reads: forty times the slowest judgment, for
+a slower node and Annals over a real network. A read not back by then is
+no proof, so the effect asks people, and the judge still answers.
+
+### Replay
+
+A draft gate pack is replayed before it counts:
+
+```bash
+trellis replay -config config.yaml -pack acme-gate-next -since 30d
+```
+
+It reads from Annals (`GET /v1/events`, with `gate.annals`' token) every
+`change.stated` record in the range, and every `change.ended` and
+`change.observed` record since its start, joined by the change each names.
+It judges each change with the pack as a draft, at the time it was stated,
+with proof as it stood then: Annals' counts now, less what the watch saw
+from that time on. It prints the changes judged, how many it would have
+`asked` of people and `passed` to no one, the `misses` (passed, and the
+watch then saw harm), the `blind` (passed, ran, and no watch could see),
+and the `needless` asks (asked, ran, and the watch saw them clean), and
+exits 1 on a miss. `-packs-dir` tries a folder of gate packs beside the
+configured ones, and `-catalog=false` skips the pass of the sources that
+gives the rules the catalog. Annals keeps no part a writer could not name,
+so a replay judges none.
 
 ## Findings in the catalog
 
@@ -919,6 +1108,8 @@ source could not read counts as missed), `trellis.pack.verdict` and `trellis.pac
 per pillar, `trellis.source.run` by source and outcome,
 `trellis.source.duration`, `trellis.refresh.age`, `trellis.push`,
 `trellis.browser.batches`,
+`trellis.judgments` by outcome (`no_one`, `people`, `refused`, `failed`),
+`trellis.judge.duration`,
 `trellis.build_info`, `http.server.request.duration`, and the process's
 `process.cpu.time` and `process.memory.usage`. A rule that does not count
 yet, drafted or announced, is never in a finding count. At start, trellis

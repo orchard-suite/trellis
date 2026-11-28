@@ -57,8 +57,9 @@ func init() {
 			Token    string    `yaml:"token"`
 			Mappings []Mapping `yaml:"mappings"`
 			// Include adds the mappings of files: standard, the built-in
-			// ones for a catalog on the blueprint standard, or a path
-			// relative to the settings file.
+			// ones for a catalog on the blueprint standard; safe_paths,
+			// the hub's own safe paths for the judge; or a path relative
+			// to the settings file.
 			Include []string `yaml:"include"`
 			Posture bool     `yaml:"posture"`
 		}
@@ -66,8 +67,8 @@ func init() {
 			return nil, err
 		}
 		for _, inc := range c.Include {
-			raw := Standard
-			if inc != "standard" {
+			raw, builtIn := Included[inc]
+			if !builtIn {
 				path := inc
 				if !filepath.IsAbs(path) {
 					path = filepath.Join(env.Dir, path)

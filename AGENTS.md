@@ -13,7 +13,9 @@ https://github.com/orchard-suite/hedge/blob/main/docs/fixtures.md.
 ## Shape
 
 - `cmd/trellis` is the one binary. `main.go` is the commands, `board.go`
-  builds the board from the config file, and `check.go` judges a checkout.
+  builds the board and the judge from the config file, `check.go` judges a
+  checkout, and `judge.go` is `trellis judge` (through the control port)
+  and `trellis replay`.
   One Go module, no CGO, a distroless image; `action.Dockerfile` is the
   pipeline image, with git.
 - `internal/estate` is the data: subjects of open kinds, each with named
@@ -57,6 +59,19 @@ https://github.com/orchard-suite/hedge/blob/main/docs/fixtures.md.
   pass's set from the snapshot, never one fixed at start. A brought rule's
   check reads the engine's verdict and nothing else; one engine per
   property, so an estate deletes its own rule once the engine judges it.
+- `internal/gate` is the judge of one change handed in: a platform kit
+  change statement made into gate subjects (the change, each effect, each
+  unknown part), each effect's proof read from Annals by key before the
+  rules run, the fences, the strict join of every rule's route, and the
+  drafts. `Catalog` indexes the board's estate once a pass, so a judgment
+  looks things up by key and never scans. `Replay` judges a gate pack over
+  Annals' past changes with proof as it stood then. Gate packs are
+  `family: gate`: `pack.LoadGate` reads them, `pack.Load` never does, and
+  their rules run in the gate stage alone, never as board findings. The
+  base gate pack `gate` always counts and no estate pack replaces it; the
+  fences are the judge's code, not a pack's rules. The judge's limit,
+  `gate.Limit`, comes from `BenchmarkJudge` at the scale target: rerun it
+  and update the number in `README.md` when the judgment changes.
 - `packs/` are the built-in packs, embedded by `trellis.go`. A rule names
   the platform standard rule it enforces and its pillar.
   `packs/testdata/<pack>.yaml` gives every rule a failing, a passing, and
@@ -74,8 +89,8 @@ https://github.com/orchard-suite/hedge/blob/main/docs/fixtures.md.
   as events, and calls the sinks. `internal/server` serves the board: the session port
   trusts the sign-in proxy's headers (`internal/door`) and must be reachable
   from that proxy only; the health port trusts nothing; the control port,
-  where `trellis refresh` asks for a pass, listens on loopback only
-  (ADR-2001). Decision records are in `docs/decisions/`. `internal/web` is
+  where `trellis refresh` asks for a pass and `POST /v1/judge` routes a
+  change, listens on loopback only (ADR-2001). Decision records are in `docs/decisions/`. `internal/web` is
   the page: plain ES modules, no build step; kinds and pack titles come from
   the board's JSON. The server serves assets under `/static/<release>/`, so
   import modules by relative path and never hard-code `/static/`.

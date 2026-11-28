@@ -13,6 +13,15 @@ import (
 //go:embed standard.yaml
 var Standard []byte
 
+// SafePaths is the mapping of the hub's own safe paths, which an estate
+// includes as "safe_paths" so the judge reads them.
+//
+//go:embed safe_paths.yaml
+var SafePaths []byte
+
+// Included are the built-in mapping files an estate includes by name.
+var Included = map[string][]byte{"standard": Standard, "safe_paths": SafePaths}
+
 // ParseMappings reads a mappings file.
 func ParseMappings(raw []byte) ([]Mapping, error) {
 	var f struct {

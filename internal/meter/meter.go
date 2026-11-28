@@ -29,6 +29,8 @@ type Metrics struct {
 	sourceRuns metric.Int64Counter
 	sourceTime metric.Float64Histogram
 	pushes     metric.Int64Counter
+	judgments  metric.Int64Counter
+	judgeTime  metric.Float64Histogram
 
 	mu        sync.Mutex
 	last      *judge.Evaluation
@@ -48,6 +50,12 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 	if out.pushes, err = m.Int64Counter("trellis.push", metric.WithDescription("Pushes of findings to the catalog, by outcome.")); err != nil {
+		return nil, err
+	}
+	if out.judgments, err = m.Int64Counter("trellis.judgments", metric.WithDescription("Changes the judge answered or refused, by outcome: no_one, people, refused, or failed.")); err != nil {
+		return nil, err
+	}
+	if out.judgeTime, err = m.Float64Histogram("trellis.judge.duration", metric.WithUnit("s"), metric.WithDescription("How long the judge took to answer one change, proof reads included.")); err != nil {
 		return nil, err
 	}
 	findings, err := m.Int64ObservableGauge("trellis.findings", metric.WithDescription("Open findings a waiver does not cover, by rule, pack, severity, and kind."))
@@ -189,4 +197,14 @@ func (m *Metrics) Refreshed(ev *judge.Evaluation, runs []sources.Run, at time.Ti
 // Push counts one push of findings by outcome.
 func (m *Metrics) Push(ctx context.Context, outcome string) {
 	m.pushes.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
+}
+
+// Judged counts one change the judge answered (its route, no_one or
+// people) or did not (refused or failed), and how long it took.
+func (m *Metrics) Judged(ctx context.Context, outcome string, d time.Duration) {
+	if m == nil {
+		return
+	}
+	m.judgments.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
+	m.judgeTime.Record(ctx, d.Seconds())
 }

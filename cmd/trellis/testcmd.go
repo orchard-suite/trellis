@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/orchard-suite/trellis"
@@ -24,16 +25,36 @@ func runTest(args []string) error {
 	if *fixtures == "" {
 		*fixtures = filepath.Join(*dir, "testdata")
 	}
-	// Every pack with the estate's tuning, as the board loads them; only
-	// the estate's own are held to its fixtures.
-	all, err := pack.Load(trellis.Packs(), *dir, nil)
+	// Every pack with the estate's tuning, as the board and the judge load
+	// them; only the estate's own are held to its fixtures.
+	board, err := pack.Load(trellis.Packs(), *dir, nil)
 	if err != nil {
 		return err
 	}
-	set := &pack.Set{Params: all.Params}
-	for _, p := range all.Packs {
-		if !strings.HasPrefix(p.Source, "built in:") {
-			set.Packs = append(set.Packs, p)
+	read, err := pack.ReadAll(trellis.Packs(), *dir)
+	if err != nil {
+		return err
+	}
+	var gates []string
+	for id, p := range read {
+		if p.Gate() && id != pack.BaseGate {
+			gates = append(gates, id)
+		}
+	}
+	sort.Strings(gates)
+	gate, err := pack.LoadGate(trellis.Packs(), *dir, gates)
+	if err != nil {
+		return err
+	}
+	set := &pack.Set{Params: map[string]map[string]any{}}
+	for _, side := range []*pack.Set{board, gate} {
+		for id, v := range side.Params {
+			set.Params[id] = v
+		}
+		for _, p := range side.Packs {
+			if !strings.HasPrefix(p.Source, "built in:") {
+				set.Packs = append(set.Packs, p)
+			}
 		}
 	}
 	fx, err := packtest.ReadDir(*fixtures)

@@ -1,0 +1,110 @@
+# An estate's own gate pack: who looks at a change before it runs. The
+# judge reads it beside the built-in base pack, whose fences hold whatever
+# it says; `gate.packs` in config.yaml names it. A rule that fails, or has
+# no data, sends the change to the people its route names: grants in the
+# runner's own terms for approvers, a quorum, and CEL for by when and from
+# when. `trellis test -packs-dir packs` holds it to its fixtures.
+pack: example-gate
+title: Change gate
+about: Who looks at a change to a live thing before it runs
+version: 1.0.0
+family: gate
+kinds:
+  # A kind of the estate's own work: mail that cannot be called back.
+  - { name: sends, family: exposure, means: People outside receive something that cannot be called back., unit: people }
+params:
+  # The bill may move this much a month, in minor units, with no one asked.
+  cost_ask: 50000
+  # A disruption to a thing more subjects than this lean on asks two people.
+  leaning_ask: 20
+  # Mail to more people than this asks the web team.
+  sends_ask: 0
+rules:
+  - id: effect.grants-access
+    title: A change grants access
+    aim: The change grants no access
+    kind: effect
+    standard: human-access-only-through-project-role-groups-assigned-in-on
+    pillar: platform/security
+    skip: [{ if: effect.kind != "grants", because: the effect grants nothing }]
+    needs: { effect.size: the writer did not say how many principals it grants }
+    check: effect.size == 0
+    detail: 'plural(effect.size, "principal", "principals") + " gain access to " + effect.subject.key'
+    fix: Grant access through a role group, or ask the platform team.
+    route:
+      grants: [{ field: team, values: [platform] }]
+      by: now + duration("24h")
+
+  - id: effect.loses-for-good
+    title: A change loses data or a name for good
+    aim: The change loses nothing it cannot put back
+    kind: effect
+    standard: production-data-never-reaches-a-lower-environment-unmasked
+    pillar: platform/security
+    skip: [{ if: effect.kind != "loses", because: the effect loses nothing }]
+    needs: { effect.undo: the writer did not say whether it can be undone }
+    check: effect.undo == "yes"
+    detail: 'effect.subject.key + " loses what the old artifact cannot put back (" + effect.undo + ")"'
+    fix: Keep a copy the old artifact can restore, or have two people agree.
+    route:
+      grants: [{ field: team, values: [platform] }]
+      quorum: 2
+      by: now + duration("24h")
+
+  - id: effect.costs-much
+    title: A change moves the bill past what passes alone
+    aim: The change moves the bill no further than passes alone
+    kind: effect
+    standard: set-rigor-by-what-a-failure-costs-in-a-few-named-classes
+    pillar: platform/control_plane
+    skip: [{ if: effect.kind != "costs", because: the effect moves no bill }]
+    needs: { effect.size: the writer did not say how far the bill moves }
+    check: effect.size <= params.cost_ask
+    detail: '"the bill moves " + string(int(effect.size)) + " a month, over " + string(int(params.cost_ask))'
+    fix: Ask the payments team, or size the change down.
+    route:
+      grants: [{ field: team, values: [payments] }]
+
+  - id: effect.disrupts-many
+    title: A change disrupts a thing many others lean on
+    aim: The change disrupts nothing many others lean on
+    kind: effect
+    standard: set-rigor-by-what-a-failure-costs-in-a-few-named-classes
+    pillar: platform/control_plane
+    skip: [{ if: effect.family != "disruption", because: the effect disrupts nothing }]
+    needs: { effect.leaning: the board has not read the catalog the thing is in }
+    check: effect.leaning <= params.leaning_ask
+    detail: 'plural(effect.leaning, "subject leans", "subjects lean") + " on " + effect.subject.key'
+    fix: Change it by a path the watch has proven, or out of hours with two people.
+    route:
+      grants: [{ field: team, values: [platform] }]
+      quorum: 2
+      start: now + duration("1h")
+
+  - id: effect.sends-outside
+    title: A change sends what cannot be called back
+    aim: The change sends nothing it cannot call back
+    kind: effect
+    standard: set-rigor-by-what-a-failure-costs-in-a-few-named-classes
+    pillar: platform/control_plane
+    skip: [{ if: effect.kind != "sends", because: the effect sends nothing }]
+    needs: { effect.size: the writer did not say how many people receive it }
+    check: effect.size <= params.sends_ask
+    detail: 'plural(effect.size, "person", "people") + " outside receive it"'
+    fix: Ask the web team before it sends.
+    route:
+      grants: [{ field: team, values: [web] }]
+      by: now + duration("4h")
+
+  - id: change.agent-alone
+    title: An agent asks for a change on no one's behalf
+    aim: Every agent's change is asked for a person
+    kind: change
+    standard: agents-deliver-their-own-verified-work-except-infrastructure
+    pillar: platform/agents
+    needs: { change.actor.kind: the statement names no actor }
+    check: change.actor.kind != "agent" || change.actor.on_behalf_of != ""
+    detail: '"the agent " + change.actor.id + " acts for no one"'
+    fix: Have the agent's person ask, or name them in on_behalf_of.
+    route:
+      grants: [{ field: team, values: [platform] }]

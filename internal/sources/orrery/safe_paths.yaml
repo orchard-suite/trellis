@@ -1,0 +1,16 @@
+# The hub's safe paths, as the judge reads them: one subject of kind
+# safe_path for each thing and path a change reached it by without
+# changing it in place, with when the watch last proved it and last saw it
+# do harm. The hub writes them itself from the watch's verdicts. Include it
+# as safe_paths, and set gate.safe_paths: safe_path.
+mappings:
+  - kind: safe_path
+    blueprint: orrery_safe_path
+    optional: true
+    link: false
+    fields:
+      path: entity.fields.?path.orValue(null)
+      subject_blueprint: entity.fields.?subject_blueprint.orValue(null)
+      subject_key: entity.fields.?subject_key.orValue(null)
+      proven_at: entity.fields.?proven_at.orValue(null)
+      failed_at: entity.fields.?failed_at.orValue(null)

@@ -1,0 +1,33 @@
+pack: gate
+title: Gate
+about: The suite's base routes for a change to a live thing, beside the judge's fences
+version: 1.0.0
+family: gate
+# Built in, always counted, and never replaced by an estate's pack. Its
+# rules judge one change handed in to the judge, never the estate, and
+# route it: a rule that fails, or has no data, asks people. The fences
+# (an effect with no proof or a part the writer could not name, and a
+# change applied on the machine that asked) are the judge's own and hold
+# whatever the packs say.
+
+params:
+  # How many clean watches of an effect kind, on a blueprint, by a path,
+  # with no harm seen, make its proof measured. One makes it rehearsed.
+  measured_after: 5
+
+rules:
+  - id: effect.disruption-unproven
+    title: A disruption the watch has not proven harmless
+    aim: The watch has proven the disruption harmless
+    kind: effect
+    standard: written-is-not-working-observed-local-gated-hands-on-then-gr
+    pillar: platform/control_plane
+    skip:
+      - { if: effect.family == "exposure", because: the statement itself proves an exposure once the applier recomputes it }
+    needs:
+      effect.family: the effect's kind is not registered
+      effect.proof.level: the judge read no proof for the effect
+    check: effect.proof.level in ["rehearsed", "measured"]
+    detail: '"the watch has proven " + effect.kind + " on " + effect.subject.blueprint + " by " + effect.path + " no further than " + effect.proof.level'
+    fix: Send the change by a path the watch has seen clean on this kind of thing, such as a staging slot's swap, or rehearse the same artifact where the watch looks.
+    route: {}

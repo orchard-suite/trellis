@@ -1,0 +1,9 @@
+# The base gate pack's rules judged three times each: a subject the rule
+# fails, one it passes, and one it can say nothing about. A gate subject's
+# facts are what the judge builds from a statement.
+now: 2026-11-04T12:00:00Z
+rules:
+  effect.disruption-unproven:
+    fail: { effect: { kind: stops, family: disruption, subject: { blueprint: app, key: example }, path: in-place, proof: { level: claimed } } }
+    pass: { effect: { kind: stops, family: disruption, subject: { blueprint: app, key: example }, path: swap, proof: { level: measured } } }
+    nodata: { effect: { kind: stops, family: disruption, subject: { blueprint: app, key: example }, path: swap } }

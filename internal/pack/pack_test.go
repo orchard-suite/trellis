@@ -201,3 +201,109 @@ func TestJudgingCostsTheSameHoweverManySubjectsAreLinked(t *testing.T) {
 		t.Errorf("a rule over a subject with 500 linked made %.0f allocations, with 1 linked %.0f", many, one)
 	}
 }
+
+const gatePack = `
+pack: acme-gate
+title: Acme gate
+about: Who looks
+version: 1.0.0
+family: gate
+params: { cost_ask: 100 }
+rules:
+  - id: effect.costs
+    title: Costs
+    kind: effect
+    standard: s
+    pillar: platform/control_plane
+    check: effect.size <= params.cost_ask
+    detail: '"costs"'
+    fix: Ask.
+    route: { grants: [{ field: team, values: [payments] }], quorum: 2, by: now + duration("4h") }
+`
+
+// A gate pack lives off the board: the board never loads it, its rules run
+// in the gate alone, and the base gate pack is never replaced.
+func TestGatePacksAreOffTheBoard(t *testing.T) {
+	base := fstest.MapFS{
+		"gate.yaml":   {Data: []byte(strings.Replace(strings.Replace(gatePack, "acme-gate", "gate", 1), "effect.costs", "effect.base", 1))},
+		"sample.yaml": {Data: []byte(onePack)},
+	}
+	dir := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("acme-gate.yaml", gatePack)
+	write(TuningFile, "params:\n  acme-gate: { cost_ask: 500 }\n  sample: { limit: 4 }\n")
+	board, err := Load(base, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(board.Packs) != 1 || board.Packs[0].ID != "sample" || board.Params["sample"]["limit"] != 4 {
+		t.Fatalf("the board's packs: %v, params %v", board.Packs, board.Params)
+	}
+	if _, err := Load(base, dir, []string{"acme-gate"}); err == nil || !strings.Contains(err.Error(), "gate.packs") {
+		t.Fatalf("a gate pack switched on for the board: %v", err)
+	}
+	gate, err := LoadGate(base, dir, []string{"acme-gate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gate.Packs) != 2 || gate.Packs[0].ID != BaseGate || gate.Params["acme-gate"]["cost_ask"] != 500 {
+		t.Fatalf("the gate's packs: %v, params %v", gate.Packs, gate.Params)
+	}
+	r, _ := gate.Rule("effect.costs")
+	if r.RunsIn(Board) || r.RunsIn(Check) || !r.RunsIn(Gate) {
+		t.Fatalf("a gate rule runs in the gate alone: %v", r.Stages)
+	}
+	write("gate.yaml", strings.Replace(gatePack, "acme-gate", "gate", 1))
+	if _, err := LoadGate(base, dir, nil); err == nil || !strings.Contains(err.Error(), "replaces the base gate pack") {
+		t.Fatalf("an estate pack replaced the base gate pack: %v", err)
+	}
+}
+
+func TestGateRulesAreHeldToTheirSide(t *testing.T) {
+	for name, c := range map[string]struct{ from, to, want string }{
+		"no route":                   {"    route: { grants: [{ field: team, values: [payments] }], quorum: 2, by: now + duration(\"4h\") }\n", "", "names its route"},
+		"a board kind":               {"kind: effect", "kind: repository", "judges a change"},
+		"a board stage":              {"    fix: Ask.\n", "    fix: Ask.\n    stages: [board]\n", "gate alone"},
+		"an empty grant":             {"values: [payments]", "values: []", "values holds"},
+		"a route that is not a time": {`by: now + duration("4h")`, `by: '"soon"'`, ""},
+	} {
+		_, err := Parse([]byte(strings.Replace(gatePack, c.from, c.to, 1)), name)
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want %q, got %v", name, c.want, err)
+		}
+	}
+	routed := strings.Replace(onePack, "    fix: Have fewer.\n", "    fix: Have fewer.\n    route: {}\n", 1)
+	if _, err := Parse([]byte(routed), "routed"); err == nil || !strings.Contains(err.Error(), "only a gate pack") {
+		t.Errorf("a board rule that routes: %v", err)
+	}
+}
+
+// A gate rule's route times are CEL over what it sees; one that gives no
+// timestamp gives no time, with why.
+func TestRouteTimes(t *testing.T) {
+	p, err := Parse([]byte(gatePack), "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	s := &estate.Subject{Kind: GateEffect, Key: "0", Facts: map[string]estate.Fact{"effect": {Value: map[string]any{"size": 900.0}}}}
+	prepared := Prepare(s, at, nil)
+	by, start, err := p.Rules[0].Times(prepared, map[string]any{"cost_ask": 100.0})
+	if err != nil || start != nil || by == nil || !by.Equal(at.Add(4*time.Hour)) {
+		t.Fatalf("by %v start %v err %v", by, start, err)
+	}
+	bad, _ := Parse([]byte(strings.Replace(gatePack, `by: now + duration("4h")`, `by: '"soon"'`, 1)), "bad")
+	if by, _, err := bad.Rules[0].Times(prepared, nil); by != nil || err == nil {
+		t.Fatalf("a by that is no timestamp: %v %v", by, err)
+	}
+}

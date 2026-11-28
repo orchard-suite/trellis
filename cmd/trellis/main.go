@@ -32,6 +32,15 @@ const usage = `trellis: one judge over an estate's standards.
         asks the running board for a pass now, on its control port, and
         waits for it and its sends; exits 1 when a source or a sink failed.
         In a cluster: kubectl exec deploy/trellis -- /app/trellis refresh
+  trellis judge [-control 127.0.0.1:8082] [-timeout 1m] [statement.json]
+        hands one change statement, from the file or stdin, to the running
+        board's judge on its control port and prints the answer: the route,
+        its reasons, and each draft's. Exits 1 when the statement is refused.
+  trellis replay [-config file] -pack id [-packs-dir drafts/] [-since 30d]
+                 [-until time] [-catalog=false] [-json]
+        judges a gate pack over the past changes Annals keeps, joined to what
+        each did, and prints how many it would have asked of people and how
+        many it would have passed that the watch saw do harm. Exits 1 on a miss.
   trellis test  [-packs-dir dir] [-fixtures file]
         holds an estate's packs to their fixtures: a failing, a passing,
         and a no-data case for every rule
@@ -54,6 +63,10 @@ func main() {
 		err = runCheck(os.Args[2:])
 	case "refresh":
 		err = runRefresh(os.Args[2:])
+	case "judge":
+		err = runJudge(os.Args[2:])
+	case "replay":
+		err = runReplay(os.Args[2:])
 	case "test":
 		err = runTest(os.Args[2:])
 	case "schema":
@@ -90,6 +103,10 @@ func (f *failure) Error() string {
 		return fmt.Sprintf("%d fixture problems", f.n)
 	case "pass":
 		return fmt.Sprintf("%d sources or sinks failed in the pass", f.n)
+	case "statement":
+		return "the judge refused the statement"
+	case "miss":
+		return fmt.Sprintf("the pack would have passed %d changes the watch saw do harm", f.n)
 	}
 	return fmt.Sprintf("%d findings at %s or worse", f.n, f.floor)
 }

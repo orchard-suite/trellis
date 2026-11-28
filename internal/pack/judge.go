@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -394,4 +395,34 @@ func (e *Expr) String(p *Prepared) (string, error) {
 		}
 		return "", fmt.Errorf("gives a %s, not a string", out.Type().TypeName())
 	}
+}
+
+// Times are when the people a failing gate rule asks must decide by, and
+// the earliest the change may start, from its route's expressions over
+// what the rule sees; nil when the route names none. An expression that
+// cannot be read gives no time and says why, so the change still goes to
+// people.
+func (r *Rule) Times(p *Prepared, params map[string]any) (by, start *time.Time, err error) {
+	if r.Route == nil {
+		return nil, nil, nil
+	}
+	act := p.with(params)
+	at := func(prog cel.Program, what string) (*time.Time, error) {
+		if prog == nil {
+			return nil, nil
+		}
+		out, _, err := prog.Eval(act)
+		if err != nil {
+			return nil, fmt.Errorf("route.%s: %w", what, err)
+		}
+		t, ok := out.Value().(time.Time)
+		if !ok {
+			return nil, fmt.Errorf("route.%s gives a %s, not a timestamp", what, out.Type().TypeName())
+		}
+		t = t.UTC()
+		return &t, nil
+	}
+	by, errBy := at(r.Route.by, "by")
+	start, errStart := at(r.Route.start, "start")
+	return by, start, errors.Join(errBy, errStart)
 }

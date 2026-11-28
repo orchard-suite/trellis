@@ -15,10 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/orchard-suite/platformkit/v3/annals"
+
 	"github.com/orchard-suite/trellis"
 	"github.com/orchard-suite/trellis/internal/azure"
 	"github.com/orchard-suite/trellis/internal/board"
 	"github.com/orchard-suite/trellis/internal/config"
+	"github.com/orchard-suite/trellis/internal/gate"
 	"github.com/orchard-suite/trellis/internal/history"
 	"github.com/orchard-suite/trellis/internal/judge"
 	"github.com/orchard-suite/trellis/internal/meter"
@@ -141,6 +144,17 @@ func runBoard(path, extraPacks string, once bool) error {
 	if err != nil {
 		return fail(err)
 	}
+	if cfg.Gate != nil {
+		j, err := newJudge(cfg, "", log)
+		if err != nil {
+			return fail(err)
+		}
+		b.Then(j.catalog.Update)
+		srv.UseJudge(j.Judge, metrics)
+		log.Info("the judge is on", "packs", j.Pack(), "annals", cfg.Gate.Annals != nil, "safe_paths", cfg.Gate.SafePaths, "limit", gate.Limit.String())
+	} else {
+		log.Info("the judge is off: the settings have no gate")
+	}
 	go b.Run(ctx, time.Duration(cfg.Refresh))
 
 	listeners := []struct {
@@ -223,6 +237,52 @@ func keepPruned(ctx context.Context, h *history.Postgres, days int, log *slog.Lo
 		case <-t.C:
 		}
 	}
+}
+
+// judgeOf is a judge from the settings, with the catalog it reads things
+// from, which the board fills after each pass.
+type judgeOf struct {
+	*gate.Judge
+	catalog *gate.Catalog
+	annals  *annals.Client
+}
+
+// newJudge makes the judge the settings' gate describes: the base gate pack
+// and the estate's gate packs in packs.dir, and for a trial the gate packs
+// of a folder more, beside them.
+func newJudge(cfg *config.Config, extra string, log *slog.Logger) (*judgeOf, error) {
+	g := cfg.Gate
+	set, err := pack.LoadGate(trellis.Packs(), cfg.Packs.Dir, g.Packs)
+	if err != nil {
+		return nil, err
+	}
+	if extra != "" {
+		trial, err := pack.ReadAll(os.DirFS(extra), "")
+		if err != nil {
+			return nil, err
+		}
+		more := &pack.Set{}
+		for _, p := range trial {
+			if p.ID == pack.BaseGate {
+				return nil, fmt.Errorf("%s: no pack replaces the base gate pack %s", extra, pack.BaseGate)
+			}
+			if p.Gate() {
+				more.Packs = append(more.Packs, p)
+			}
+		}
+		sort.Slice(more.Packs, func(i, k int) bool { return more.Packs[i].ID < more.Packs[k].ID })
+		set.Add(more)
+	}
+	out := &judgeOf{catalog: gate.NewCatalog(g.SafePaths)}
+	s := gate.Settings{Approvers: g.DefaultApprovers, Catalog: out.catalog, Version: version, Log: log}
+	if a := g.Annals; a != nil {
+		out.annals = annals.New(a.URL, a.Token, meter.Service)
+		s.Proofs = out.annals
+	}
+	if out.Judge, err = gate.New(set, s); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // loadPacks reads the built-in packs and the estate's with its tuning,

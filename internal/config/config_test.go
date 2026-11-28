@@ -118,3 +118,30 @@ func TestTheControlPortListensOnLoopbackOnly(t *testing.T) {
 		}
 	}
 }
+
+// The judge will not start without default approvers: a fence sends a
+// change to people, and someone must be asked.
+func TestGateNeedsDefaultApprovers(t *testing.T) {
+	t.Setenv("TEST_ORRERY_TOKEN", "tok")
+	if _, err := Parse([]byte(sample + "gate: { packs: [acme-gate] }\n")); err == nil || !strings.Contains(err.Error(), "gate.default_approvers") {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := Parse([]byte(sample + "gate: { default_approvers: [{ field: team, values: [] }] }\n")); err == nil {
+		t.Fatal("a grant with no values is refused")
+	}
+	if _, err := Parse([]byte(sample + "gate: { default_approvers: [{ field: team, values: [platform] }], annals: { url: https://annals.example.test } }\n")); err == nil {
+		t.Fatal("annals needs a token")
+	}
+	c, err := Parse([]byte(sample + `gate:
+  packs: [acme-gate]
+  default_approvers: [{ field: team, values: [platform] }]
+  annals: { url: https://annals.example.test, token: test-token }
+  safe_paths: safe_path
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := c.Gate; g.Packs[0] != "acme-gate" || g.DefaultApprovers[0].Values[0] != "platform" || g.Annals.Token != "test-token" || g.SafePaths != "safe_path" {
+		t.Fatalf("gate %+v", g)
+	}
+}

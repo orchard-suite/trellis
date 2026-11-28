@@ -14,11 +14,8 @@ import (
 )
 
 func TestEveryBuiltInPackCompiles(t *testing.T) {
-	set, err := pack.Load(Packs(), "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]bool{"security": true, "telemetry": true, "build": true, "interfaces": true, "graft": true}
+	set := builtIn(t)
+	want := map[string]bool{"security": true, "telemetry": true, "build": true, "interfaces": true, "graft": true, pack.BaseGate: true}
 	for _, p := range set.Packs {
 		delete(want, p.ID)
 	}
@@ -27,14 +24,31 @@ func TestEveryBuiltInPackCompiles(t *testing.T) {
 	}
 }
 
+// builtIn is every built-in pack as one set: the board's, and the gate's,
+// which the board never judges with.
+func builtIn(t *testing.T) *pack.Set {
+	t.Helper()
+	board, err := pack.Load(Packs(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate, err := pack.LoadGate(Packs(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range board.Packs {
+		if p.Gate() {
+			t.Fatalf("the board judges with the gate pack %s", p.ID)
+		}
+	}
+	return &pack.Set{Packs: append(board.Packs, gate.Packs...)}
+}
+
 // TestEveryRuleAnswersItsFixtures holds every built-in rule to the three
 // answers its pack's file in packs/testdata gives it: fail with a detail,
 // pass, and no data.
 func TestEveryRuleAnswersItsFixtures(t *testing.T) {
-	set, err := pack.Load(Packs(), "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	set := builtIn(t)
 	fx, err := packtest.ReadDir("packs/testdata")
 	if err != nil {
 		t.Fatal(err)
@@ -261,10 +275,7 @@ func TestChecksAgreeWithTiersOverEveryFixture(t *testing.T) {
 // TestEveryBuiltInRuleHasAnAim holds every built-in rule to an aim: the
 // requirement as met, which a catalog shows beside a check mark.
 func TestEveryBuiltInRuleHasAnAim(t *testing.T) {
-	set, err := pack.Load(Packs(), "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	set := builtIn(t)
 	for _, r := range set.Rules() {
 		switch {
 		case strings.TrimSpace(r.Aim) == "":

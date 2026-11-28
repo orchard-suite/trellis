@@ -74,6 +74,7 @@ type Board struct {
 	sinks   []Sink
 	record  Recorder
 	opened  OpenedAt
+	after   []func(*estate.Estate)
 	log     *slog.Logger
 
 	mu        sync.RWMutex
@@ -163,6 +164,10 @@ func (b *Board) Record(r Recorder, opened OpenedAt) {
 	b.record = r
 	b.opened = opened
 }
+
+// Then calls f with each pass's estate once the pass is published, before
+// its sends, as the judge indexes the catalog it reads things from.
+func (b *Board) Then(f func(*estate.Estate)) { b.after = append(b.after, f) }
 
 // Packs are the packs the board judged with on its last pass, the
 // estate's own before the first.
@@ -320,6 +325,9 @@ func (b *Board) pass(ctx context.Context) *Snapshot {
 	b.latest = snap
 	b.last = e
 	b.mu.Unlock()
+	for _, f := range b.after {
+		f(e)
+	}
 
 	b.metrics.Refreshed(&snap.Evaluation, runs, snap.RefreshedAt)
 	open := ev.Open()
